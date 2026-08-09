@@ -3,6 +3,7 @@ import { handleCoordinationReport } from './handlers.js';
 import { handleCompareSpecs } from './reporting-handler.js';
 import { handleGetProjectKeynotes } from './keynotes-handler.js';
 import { handleGetReferenceGraph } from './reference-graph-handler.js';
+import { handleTextBoxesReport } from './text-boxes-handler.js';
 import type { ToolRegistrar } from './tool-registry.js';
 
 /** Cross-cutting read-only report tools: project coordination (errors &
@@ -13,6 +14,27 @@ export function registerReportTools(reg: ToolRegistrar): void {
   registerCompareTool(reg);
   registerKeynotesTool(reg);
   registerReferenceGraphTool(reg);
+  registerTextBoxesTool(reg);
+}
+
+function registerTextBoxesTool(reg: ToolRegistrar): void {
+  reg.register(
+    'text_boxes_report',
+    {
+      description:
+        'List retained body-level text boxes in one spec or across a project (#409). ' +
+        'Each row includes specId, specSection, the object paragraph UUID, floating and ' +
+        'generation metadata, and ordered interiorText extracted from objectText children. ' +
+        'Tables are excluded. The persisted ADR-072 model does not distinguish callouts ' +
+        'from other text boxes, so no narrower subtype is guessed. Provide exactly one of ' +
+        'specId (see get_spec) or projectId (see list_projects).',
+      inputSchema: {
+        specId: z.uuid().optional().describe('Spec UUID — text boxes in one spec'),
+        projectId: z.uuid().optional().describe('Project UUID — text boxes across the project'),
+      },
+    },
+    handleTextBoxesReport
+  );
 }
 
 function registerReferenceGraphTool(reg: ToolRegistrar): void {

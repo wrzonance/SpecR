@@ -22,6 +22,7 @@ vi.mock('./handlers.js', () => ({ handleCoordinationReport: vi.fn() }));
 vi.mock('./reporting-handler.js', () => ({ handleCompareSpecs: vi.fn() }));
 vi.mock('./keynotes-handler.js', () => ({ handleGetProjectKeynotes: vi.fn() }));
 vi.mock('./reference-graph-handler.js', () => ({ handleGetReferenceGraph: vi.fn() }));
+vi.mock('./text-boxes-handler.js', () => ({ handleTextBoxesReport: vi.fn() }));
 
 import { registerReportTools } from './report-tools.js';
 import type { ToolRegistrar } from './tool-registry.js';
@@ -137,6 +138,19 @@ describe('compare_specs description — documents frozen sources and the baselin
 
   it('notes the baseline-ambiguity behavior explicitly', () => {
     expect(compareSpecsConfig().description).toMatch(/ambiguous/i);
+  });
+});
+
+describe('text_boxes_report registration (#409)', () => {
+  it('registers the scoped report with its MCP description and input shape', () => {
+    const { registrar, recorded } = fakeRegistrar();
+    registerReportTools(registrar);
+    const config = recorded.get('text_boxes_report');
+
+    expect(config).toBeDefined();
+    expect(config?.description).toContain('Tables are excluded');
+    expect(config?.inputSchema).toHaveProperty('specId');
+    expect(config?.inputSchema).toHaveProperty('projectId');
   });
 });
 

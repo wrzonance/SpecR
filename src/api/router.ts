@@ -137,6 +137,7 @@ import { compareReportHandler } from './reporting.js';
 import { CompareRequestSchema } from '../reporting/index.js';
 import { postSubmittalRegisterHandler } from './submittal-register.js';
 import { getSpecOpenCommentsHandler, getProjectOpenCommentsHandler } from './open-comments.js';
+import { registerTextBoxRoutes } from './text-boxes.js';
 import { getSpecReadinessHandler, getPackageReadinessHandler } from './readiness.js';
 import { registerParagraphClearanceRoutes } from './paragraph-clearance-routes.js';
 import {
@@ -277,6 +278,7 @@ router.post(
   postSubmittalRegisterHandler
 );
 router.get('/projects/:id/open-comments', getProjectOpenCommentsHandler);
+registerTextBoxRoutes(router);
 registerCheckpointRoutes(router);
 router.get('/projects/:id/references/inbound', getInboundReferencesHandler);
 router.get('/projects/:id/reference-graph', getProjectReferenceGraphHandler);
