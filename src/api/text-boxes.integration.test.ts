@@ -48,7 +48,7 @@ beforeAll(async () => {
      VALUES ('09 91 00', 'Painting', $1,
              (SELECT id FROM libraries WHERE name = 'Default Company Master'))
      RETURNING id`,
-    [`text-box-api-${suffix}`]
+    [`text-box-${suffix}`]
   );
   specId = spec.rows[0]!.id;
   await pool.query(`INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`, [
