@@ -58,7 +58,17 @@ const SPEC_SQL = `${REMOVED_SUBTREE_CTE}
    GROUP BY o.id, s.id, s.section, o.position, o.object_data
    ORDER BY o.position, o.id`;
 
-const PROJECT_SQL = `${REMOVED_SUBTREE_CTE}
+const PROJECT_REMOVED_SUBTREE_CTE = `WITH RECURSIVE removed_subtree AS (
+  SELECT p.id FROM paragraphs p
+   WHERE p.spec_id IN (SELECT spec_id FROM project_specs WHERE project_id = $1)
+     AND p.vanish = true
+     AND p.node_type <> 'note'
+  UNION ALL
+  SELECT c.id FROM paragraphs c
+    JOIN removed_subtree r ON c.parent_id = r.id
+)`;
+
+const PROJECT_SQL = `${PROJECT_REMOVED_SUBTREE_CTE}
   SELECT o.id AS "paragraphId", s.id AS "specId", s.section AS "specSection",
          o.object_data AS "objectData",
          COALESCE(
