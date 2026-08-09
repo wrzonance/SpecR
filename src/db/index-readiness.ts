@@ -3,7 +3,7 @@
 // readiness exports below do not fit as additions. This groups (a) the
 // pre-existing open-comments re-exports, mechanically moved here with their
 // names unchanged, and (b) every new readiness-report/readiness-gate/
-// readiness-review export. db/index.ts re-exports this whole module with a
+// readiness-review/report export. db/index.ts re-exports this whole module with a
 // single `export * from './index-readiness.js'` — every consumer still
 // imports from `'../db/index.js'`; only where the statements live moved.
 

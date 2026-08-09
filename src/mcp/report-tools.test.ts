@@ -141,6 +141,19 @@ describe('compare_specs description — documents frozen sources and the baselin
   });
 });
 
+describe('text_boxes_report registration (#409)', () => {
+  it('registers the scoped report with its MCP description and input shape', () => {
+    const { registrar, recorded } = fakeRegistrar();
+    registerReportTools(registrar);
+    const config = recorded.get('text_boxes_report');
+
+    expect(config).toBeDefined();
+    expect(config?.description).toContain('Tables are excluded');
+    expect(config?.inputSchema).toHaveProperty('specId');
+    expect(config?.inputSchema).toHaveProperty('projectId');
+  });
+});
+
 // ── openapi.yaml lockstep (#392, ADR-078) ────────────────────────────────────
 //
 // The MCP sources shape above is hand-duplicated (see file header); so is
