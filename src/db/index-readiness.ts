@@ -14,6 +14,8 @@ export type {
   OpenCommentsSummary,
   OpenCommentsReport,
 } from './queries/open-comments.js';
+export { getTextBoxesReport } from './queries/text-boxes.js';
+export type { TextBoxScope, TextBoxReportItem, TextBoxReport } from './queries/text-boxes.js';
 
 // ADR-079 (#406) — issuance-readiness gate + its read-only report surface.
 // `assertReadyForFinal` is re-exported here (not given a bespoke direct
