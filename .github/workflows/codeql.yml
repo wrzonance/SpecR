@@ -38,7 +38,7 @@ jobs:
           # install` here failed on every scheduled run since at least
           # 2026-06-22, so JS/TS CodeQL analysis was silently not running.
           # CodeQL is cron-only, so no PR ever surfaced it.
-          version: "11.18.0"
+          version: "12.1.0"
 
       - name: Setup Node.js
         if: matrix.language == 'javascript-typescript'
