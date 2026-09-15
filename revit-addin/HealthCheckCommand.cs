@@ -30,8 +30,13 @@ namespace SpecRAddin
                     $"Connected to {baseUrl}\n\nDatabase: {health.Db}\nUptime: {health.Uptime}s");
                 return Result.Succeeded;
             }
-            catch (Exception ex)
+            catch (SpecRClientException ex)
             {
+                // SpecRClient wraps every anticipated failure (bad base URL, unreachable
+                // host, HTTP error, bad envelope, timeout) in its own typed exception.
+                // Anything else is a bug and is left to Revit's own error dialog, where
+                // it surfaces with a stack instead of masquerading as a connectivity
+                // problem.
                 message = $"Could not reach SpecR at {baseUrl}: {ex.Message}";
                 return Result.Failed;
             }

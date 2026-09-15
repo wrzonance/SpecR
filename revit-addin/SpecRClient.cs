@@ -108,6 +108,11 @@ namespace SpecRAddin
             {
                 throw new SpecRClientException($"{context} failed: cannot reach SpecR ({ex.Message})", ex);
             }
+            catch (OperationCanceledException ex)
+            {
+                // HttpClient reports its own Timeout as a TaskCanceledException.
+                throw new SpecRClientException($"{context} failed: timed out or was cancelled ({ex.Message})", ex);
+            }
 
             if (!response.Success || response.Data is null)
             {

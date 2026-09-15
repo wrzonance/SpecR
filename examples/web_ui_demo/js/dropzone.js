@@ -21,13 +21,6 @@ function stageText(job) {
   return `${job.status}${pct}`;
 }
 
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
 function contextLabel(context) {
   if (context.destination === 'library') {
     return context.library === 'client'

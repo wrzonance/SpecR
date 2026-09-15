@@ -154,14 +154,13 @@ test('saveDraft: ctx.put is invoked exactly once no matter how many local edits 
   );
 });
 
-test('saveDraft: never invokes ctx.put when no save is requested (edits alone are not enough)', () => {
-  // A real ctx.put SPY stays in scope through every local edit below, so
-  // this actually proves the claim its title makes — editField/addField/
-  // removeField/editPageNumbering take no ctx parameter at all, so there is
-  // no path from a local edit to a network call, but asserting the spy's
-  // call count (rather than merely re-checking the draft shape, which the
-  // 'addField / removeField' and 'editPageNumbering' tests above already
-  // pin) is what makes this test capable of failing for the reason it claims.
+test('saveDraft: ctx.put fires only from saveDraft(), never from local edits alone', async () => {
+  // editField/addField/removeField/editPageNumbering take no ctx parameter at
+  // all, so there is no path from a local edit to a network call. Asserting
+  // the same ctx.put spy's call count both before and after saveDraft()
+  // (rather than merely re-checking the draft shape, which the 'addField /
+  // removeField' and 'editPageNumbering' tests above already pin) is what
+  // makes this test capable of failing for the reason its title claims.
   const putCalls = [];
   const ctx = {
     put: async (composition) => {
@@ -176,12 +175,11 @@ test('saveDraft: never invokes ctx.put when no save is requested (edits alone ar
   draft = addField(draft, 'default', 'footer', 'right', { kind: 'date' });
   draft = editPageNumbering(draft, { mode: 'continuous' });
 
-  assert.equal(
-    putCalls.length,
-    0,
-    'ctx.put must not fire from local edits alone — only saveDraft() invokes it'
-  );
+  assert.equal(putCalls.length, 0, 'ctx.put must not fire from local edits alone');
   assert.equal(draft.dirty, true);
+
+  await saveDraft(ctx, draft);
+  assert.equal(putCalls.length, 1, 'only saveDraft() invokes ctx.put, exactly once');
 });
 
 test('saveDraft: onSaved fires after ctx.put resolves and before saveDraft itself resolves', async () => {
