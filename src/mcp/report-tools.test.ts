@@ -58,8 +58,8 @@ function compareSpecsConfig(): Recorded {
   return config;
 }
 
-function sourcesSchema(): z.ZodTypeAny {
-  const shape = compareSpecsConfig().inputSchema as { sources?: z.ZodTypeAny };
+function sourcesSchema(): z.ZodType {
+  const shape = compareSpecsConfig().inputSchema as { sources?: z.ZodType };
   const schema = shape.sources;
   if (schema === undefined) throw new Error('compare_specs registered no sources schema');
   return schema;

@@ -809,7 +809,9 @@ describe('tool: generate_docx', () => {
     // The SDK's own InvalidParams (-32602) surfaces as an isError tool result.
     expect(result['isError']).toBe(true);
     const text = (result['content'] as { text: string }[])[0]?.text ?? '';
-    expect(text).toContain('unrecognized_keys');
+    // SDK <=1.29 echoed the raw Zod issue (`"code":"unrecognized_keys"`); 1.30+
+    // prettifies it (`Unrecognized key: "mdoe"`). Match the substance, not the format.
+    expect(text).toMatch(/unrecognized[ _]key/i);
     expect(text).toContain('mdoe');
     // The load-bearing part: no document came back. A stripped key would have
     // produced a perfectly valid draft DOCX instead.
