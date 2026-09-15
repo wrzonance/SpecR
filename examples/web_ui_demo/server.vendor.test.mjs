@@ -11,7 +11,10 @@ import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 
 const SERVER = fileURLToPath(new URL('./server.mjs', import.meta.url));
-const UMD_MARKER = 'github.com/markdown-it'; // in the bundle banner, not in index.html
+// markdown-it 15's UMD bundle ships without a license banner, so the marker is the
+// UMD prologue's global assignment (`e.markdownit=t()`); index.html only ever mentions
+// `window.markdownit` in prose, never assigns it, so the SPA fallback can't match this.
+const UMD_GLOBAL_ASSIGNMENT = /\.markdownit\s*=/;
 
 let child;
 let port;
@@ -35,18 +38,16 @@ test('GET /vendor/markdown-it.min.js serves the lockfile-pinned UMD bundle', asy
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type') || '', /javascript/);
   const body = await res.text();
-  assert.ok(body.includes('markdownit'), 'expected the markdown-it UMD global');
-  assert.ok(body.includes(UMD_MARKER), 'expected the markdown-it bundle banner');
+  assert.match(body, UMD_GLOBAL_ASSIGNMENT, 'expected the markdown-it UMD global assignment');
 });
 
 test('an unlisted /vendor file is not served from node_modules (exact allowlist)', async () => {
-  // markdown-it.js (the non-min UMD) really exists under node_modules/markdown-it/dist,
-  // but only markdown-it.min.js is allowlisted. The request must fall through to static
-  // serving and get the SPA fallback — never the node_modules file.
+  // Only /vendor/markdown-it.min.js is allowlisted; a sibling spelling must fall through
+  // to static serving and get the SPA fallback — never anything out of node_modules.
   const res = await fetch(`http://127.0.0.1:${port}/vendor/markdown-it.js`);
   const body = await res.text();
   assert.match(res.headers.get('content-type') || '', /text\/html/);
-  assert.ok(!body.includes(UMD_MARKER), 'must not leak an unlisted node_modules file');
+  assert.doesNotMatch(body, UMD_GLOBAL_ASSIGNMENT, 'must not leak an unlisted node_modules file');
 });
 
 async function waitForPort(p) {
