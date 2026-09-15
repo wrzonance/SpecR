@@ -11,6 +11,12 @@
       "groupName": "npm-deps"
     },
     {
+      "description": "Security floors in pnpm-workspace.yaml `overrides` are hand-maintained, advisory-driven ranges of the form `>=patched <nextMajor` (see the comments beside each). Renovate has no business rewriting them: every rewrite so far stripped the explanatory comment blocks (#602, #606, #677) and widened the ceilings across a major (`<5` → `<6`), which is exactly the unbounded-floor shape that broke undici/js-yaml consumers in #504. New advisories are handled by editing the floor by hand in a sweep PR, not by a range bump.",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["pnpm-workspace.overrides"],
+      "enabled": false
+    },
+    {
       "description": "Major bumps for OOXML/DOCX libs require manual review — may change numbering or content control behavior",
       "matchPackageNames": ["docx", "jszip"],
       "matchUpdateTypes": ["major"],

@@ -69,7 +69,7 @@
     "@types/node": "^24.13.3",
     "@types/pg": "^8.20.0",
     "@types/yauzl": "^3.4.0",
-    "@vitest/coverage-v8": "^4.1.5",
+    "@vitest/coverage-v8": "^5.0.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "depcheck": "^1.0.0",
@@ -84,6 +84,6 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^4.1.5"
+    "vitest": "^5.0.0"
   }
 }
