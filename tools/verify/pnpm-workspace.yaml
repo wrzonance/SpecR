@@ -1,15 +1,3 @@
-# tools/verify is an ISOLATED pnpm workspace root, deliberately separate from
-# the repo root's pnpm-workspace.yaml. `packages: []` is what makes this the
-# case: pnpm resolves the nearest pnpm-workspace.yaml walking up from the cwd,
-# and stops there. Without this file, `pnpm --dir tools/verify install`
-# silently resolves against the REPO ROOT importer instead — confirmed by the
-# WT-150 spike (finding 0): zero node_modules created under tools/verify,
-# "Already up to date" printed, no error. This file must exist before the
-# first `pnpm --dir tools/verify install` or that install silently no-ops.
-#
-# tools/verify gets its own pnpm-lock.yaml and node_modules, entirely
-# independent of the root's — see workspace-isolation.test.ts for the pinned
-# invariant.
 packages: []
 
 # Mirrors the root pnpm-workspace.yaml's allowBuilds: esbuild's postinstall
@@ -33,8 +21,8 @@ engineStrict: true
 # js-yaml and postcss are eslint/vite dev-tooling only.
 overrides:
   qs@<6.16.0: '>=6.16.0 <7' # runtime, via express → body-parser (GHSA-4mjr-xmp4-gh2g, GHSA-x5fp-wj9c-mxmx)
-  'js-yaml@>=4.0.0 <4.3.2': '>=4.3.2 <5' # dev, via eslint (GHSA-2883-xcg3-v3hh, GHSA-5p4m-2wfm-xmqj)
+  'js-yaml@>=4.0.0 <4.3.2': '>=4.3.2 <6' # dev, via eslint (GHSA-2883-xcg3-v3hh, GHSA-5p4m-2wfm-xmqj)
   postcss@<8.5.23: '>=8.5.23 <9' # dev, via vite (GHSA-fxqj-rqcc-2cmp)
   # dev, via minimatch@3 (eslint). GHSA-mh99-v99m-4gvg, GHSA-rgw5-rvv9-x895 — surfaced by
   # `pnpm audit`; the repo root already resolves 1.1.18 natively.
-  'brace-expansion@>=1.0.0 <1.1.18': '>=1.1.18 <2'
+  'brace-expansion@>=1.0.0 <1.1.18': '>=1.1.18 <6'

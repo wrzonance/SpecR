@@ -1,16 +1,3 @@
-# Fail `pnpm install` outright when the running Node does not satisfy the
-# `engines.node` range in package.json, instead of printing a warning and
-# continuing. This is what makes the Node 24 pin real rather than advisory —
-# see .nvmrc and ADR-081.
-#
-# pnpm 11 reads this key HERE, in camelCase. Neither `engine-strict=true` in
-# .npmrc (the npm spelling) nor `engine-strict` in kebab-case has any effect —
-# both were measured to exit 0 on a violating runtime.
-#
-# Renovate strips this block whenever it rewrites the overrides below (#602,
-# #606). If it goes missing again, restore it — the note is what stops someone
-# "tidying" the key back into .npmrc and silently reducing the Node pin to
-# advisory.
 engineStrict: true
 
 # pnpm 11 — allow esbuild postinstall binary build (required by vitest/tsx).
@@ -42,13 +29,13 @@ overrides:
   # GHSA-gqvv-2mrq-wpjv, GHSA-g6gw-c38x-mqfc, GHSA-crvj-82cr-hjcx (<4.13.5) on
   # top of the earlier 4.12.x advisories.
   hono@<4.13.5: '>=4.13.5 <5'
-  '@hono/node-server@<1.19.15': '>=1.19.15 <2' # GHSA-frvp-7c67-39w9 (serve-static, Windows)
+  '@hono/node-server@<1.19.15': '>=1.19.15 <3' # GHSA-frvp-7c67-39w9 (serve-static, Windows)
   qs@<6.16.0: '>=6.16.0 <7' # runtime, via express → body-parser (CVE-2026-8723, GHSA-4mjr-xmp4-gh2g, GHSA-x5fp-wj9c-mxmx)
   esbuild@<0.28.1: '>=0.28.1' # GHSA-gv7w-rqvm-qjhr (high), -g7r4-m6w7-qqqr
   dompurify@<3.4.11: '>=3.4.11' # GHSA-vxr8-fq34-vvx9, GHSA-cmwh-pvxp-8882 (≤3.4.10)
   # GHSA-h67p-54hq-rp68, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh (dev, via eslint and
   # json-schema-ref-parser's 4.x consumers)
-  'js-yaml@>=4.0.0 <4.3.2': '>=4.3.2 <5'
+  'js-yaml@>=4.0.0 <4.3.2': '>=4.3.2 <6'
   # GHSA-h67p-54hq-rp68 3.x backport (dev, via depcheck ^3.14.1). Ceiling raised
   # 3.x → 5.x in #606; depcheck now resolves js-yaml 5.2.3. js-yaml 4 REMOVED
   # `safeLoad`, which depcheck still calls in three places, so this was verified
@@ -73,13 +60,13 @@ overrides:
   # GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf, GHSA-7p8r-x3mc-p8w7,
   # GHSA-v2hh-gcrm-f6hx, GHSA-4c8g-83qw-93j6 (host confusion / SSRF in URI
   # normalization; ajv only uses it to resolve schema $ref ids).
-  fast-uri@<3.1.6: '>=3.1.6 <4'
+  fast-uri@<3.1.6: '>=3.1.6 <5'
   # runtime, via docx's 5.x consumer only — postcss's nanoid@3 line is not
   # affected and MUST stay on 3.x (nanoid 5 is ESM-only). GHSA-28wg-ghj8-5hjv.
-  'nanoid@>=5.0.0 <5.1.16': '>=5.1.16 <6'
+  'nanoid@>=5.0.0 <5.1.16': '>=5.1.16 <7'
   # dev, via vite / depcheck. GHSA-fxqj-rqcc-2cmp, GHSA-r28c-9q8g-f849
   # (sourceMappingURL .map disclosure; never invoked on untrusted CSS here).
   postcss@<8.5.23: '>=8.5.23 <9'
   # dev, via minimatch@7 (eslint tooling). GHSA-3jxr-9vmj-r5cp (exponential
   # expansion DoS); the 1.x line under minimatch@3 is not in the affected range.
-  'brace-expansion@>=2.0.0 <2.1.2': '>=2.1.2 <3'
+  'brace-expansion@>=2.0.0 <2.1.2': '>=2.1.2 <6'
