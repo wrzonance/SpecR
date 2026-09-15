@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadLocalEnv } from './env-file.mjs';
-import { sendJson, readRequestBody } from './http-utils.mjs';
+import { sendJson, readRequestBody, upstreamUrl } from './http-utils.mjs';
 import { createMcpBridge } from './mcp-bridge.mjs';
 import { createChatHandler } from './chat-handler.mjs';
 import { createReportHandler } from './report-handler.mjs';
@@ -151,7 +151,7 @@ async function proxyApi(req, res, url) {
   try {
     const body =
       req.method === 'GET' || req.method === 'HEAD' ? undefined : await readRequestBody(req);
-    const upstream = await fetch(new URL(`${url.pathname}${url.search}`, API_BASE), {
+    const upstream = await fetch(upstreamUrl(API_BASE, url.pathname, url.search), {
       method: req.method,
       headers: proxyHeaders(req, body),
       body,
