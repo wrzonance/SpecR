@@ -10,20 +10,27 @@ vi.mock('../lib/env.js', () => ({
   },
 }));
 
+// The mocked Pool instance is held in vi.hoisted state rather than read back
+// from `vi.mocked(Pool).mock.results`: Vitest 5 clears every mock's recorded
+// calls/results before each test (`clearMocks` now defaults to true), and the
+// Pool constructor only runs once, at module load — so its result would be
+// gone by the time the first test looked for it.
+const { pool } = vi.hoisted(() => ({
+  pool: { query: vi.fn(), end: vi.fn(), on: vi.fn() },
+}));
+
 // Mock pg Pool as a constructable — hoisted before static imports
 vi.mock('pg', () => {
-  const pool = { query: vi.fn(), end: vi.fn(), on: vi.fn() };
   const Pool = vi.fn(function () {
     return pool;
   });
   return { Pool };
 });
 
-import { Pool } from 'pg';
 import { DatabaseError, pingDatabase } from './index.js';
 
 function getPool(): { query: ReturnType<typeof vi.fn> } {
-  return vi.mocked(Pool).mock.results[0]?.value as { query: ReturnType<typeof vi.fn> };
+  return pool;
 }
 
 describe('db/index', () => {
