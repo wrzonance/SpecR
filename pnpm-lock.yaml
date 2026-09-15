@@ -112,7 +112,7 @@ importers:
         specifier: ^3.4.0
         version: 3.4.0
       '@vitest/coverage-v8':
-        specifier: ^4.1.11
+        specifier: ^4.1.5
         version: 4.1.11(vitest@4.1.11)
       ajv:
         specifier: ^8.20.0
