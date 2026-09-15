@@ -35,3 +35,19 @@ export async function readBoundedBody(req, maxBytes) {
   }
   return chunks.length > 0 ? Buffer.concat(chunks) : undefined;
 }
+
+// Build the upstream URL for a proxied API request. The request's path and
+// query are copied onto a URL constructed from `apiBase` alone — assigning
+// `pathname`/`search` on a parsed URL can never change its scheme, host or
+// port, whereas `new URL(pathname, apiBase)` would treat a path beginning with
+// `//` (e.g. from `/specs/..//evil.example/x`) as a scheme-relative URL and
+// retarget the whole request at another host. The API-prefix allowlist in
+// server.mjs already keeps such paths out of the proxy; this makes the proxy
+// safe even without it (CodeQL js/request-forgery).
+export function upstreamUrl(apiBase, pathname, search = '') {
+  const target = new URL(apiBase);
+  target.pathname = pathname;
+  target.search = search;
+  target.hash = '';
+  return target;
+}

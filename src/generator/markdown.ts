@@ -19,9 +19,11 @@ function collapseBreaks(text: string): string {
 }
 
 // GFM pipe-table cells additionally can't carry an unescaped `|` — escape it so a cell
-// like "A | B" doesn't fracture the row into extra columns.
+// like "A | B" doesn't fracture the row into extra columns. Backslashes are escaped
+// FIRST: a literal `\|` in the source would otherwise become `\\|`, which GFM reads as
+// an escaped backslash followed by a live cell delimiter (CodeQL js/incomplete-sanitization).
 function escapeTableCell(text: string): string {
-  return collapseBreaks(text.replace(/\|/g, '\\|'));
+  return collapseBreaks(text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|'));
 }
 
 function chunkIntoRows(cells: readonly SpecNode[], columns: number): readonly SpecNode[][] {

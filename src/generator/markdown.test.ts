@@ -446,6 +446,16 @@ describe('renderMarkdown', () => {
     expect(md).toBe('# SECTION 01 00 00 — Roots\n' + '\n| A \\| B |\n| --- |\n| Line1 Line2 |');
   });
 
+  it('escapes a backslash before a pipe so a literal `\\|` cannot become a live cell delimiter', () => {
+    // CodeQL js/incomplete-sanitization: escaping only `|` turned a source `\\|` into `\\\\|`,
+    // which GFM reads as an escaped backslash followed by an UNESCAPED pipe — the row
+    // fractured exactly as if nothing had been escaped. Backslashes must be doubled first.
+    const md = renderMarkdown(
+      rootTree([tableObjectNode('t4', { rows: 2, columns: 1 }, ['C:\\Specs', 'a\\|b'])])
+    );
+    expect(md).toBe('# SECTION 01 00 00 — Roots\n' + '\n| C:\\\\Specs |\n| --- |\n| a\\\\\\|b |');
+  });
+
   it('#300: collapses hard breaks in text-box and fallback content so no line escapes the blockquote', () => {
     // A literal newline in a `> **[TEXT BOX]** ...` line would orphan the tail as a
     // plain paragraph outside the blockquote — same hazard escapeTableCell already
