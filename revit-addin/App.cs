@@ -40,8 +40,13 @@ namespace SpecRAddin
                 panel.AddItem(buttonData);
                 return Result.Succeeded;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is Autodesk.Revit.Exceptions.ApplicationException
+                                       || ex is InvalidOperationException)
             {
+                // Ribbon API failures (tab or panel name already taken, too many custom
+                // tabs, bad button data) and the type-name guard above are reported in
+                // our own dialog. Anything else is a bug and is left to Revit's add-in
+                // loader, which reports it with a stack and disables the add-in either way.
                 TaskDialog.Show("SpecR", $"Failed to initialize the SpecR add-in:\n{ex.Message}");
                 return Result.Failed;
             }
