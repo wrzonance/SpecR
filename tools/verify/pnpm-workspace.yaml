@@ -25,3 +25,16 @@ allowBuilds:
 # happily on a wrong Node despite its own engines.node range — measured: exit 0
 # on Node 26.4.0 against engines ">=24 <25".
 engineStrict: true
+
+# Security overrides — same practice as the repo root's pnpm-workspace.yaml
+# (and, like engineStrict above, they must be repeated here because this is an
+# isolated workspace root). Floors are bounded to the consumer's major. None of
+# the flagged code paths run in the harness: qs.stringify is never called,
+# js-yaml and postcss are eslint/vite dev-tooling only.
+overrides:
+  qs@<6.16.0: '>=6.16.0 <7' # runtime, via express → body-parser (GHSA-4mjr-xmp4-gh2g, GHSA-x5fp-wj9c-mxmx)
+  'js-yaml@>=4.0.0 <4.3.2': '>=4.3.2 <5' # dev, via eslint (GHSA-2883-xcg3-v3hh, GHSA-5p4m-2wfm-xmqj)
+  postcss@<8.5.23: '>=8.5.23 <9' # dev, via vite (GHSA-fxqj-rqcc-2cmp)
+  # dev, via minimatch@3 (eslint). GHSA-mh99-v99m-4gvg, GHSA-rgw5-rvv9-x895 — surfaced by
+  # `pnpm audit`; the repo root already resolves 1.1.18 natively.
+  'brace-expansion@>=1.0.0 <1.1.18': '>=1.1.18 <2'
