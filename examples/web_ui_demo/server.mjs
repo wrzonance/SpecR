@@ -102,21 +102,29 @@ const MIME_TYPES = new Map([
 
 // Explicit, lockfile-pinned vendor allowlist. Each entry maps an EXACT request path
 // to an EXACT file resolved out of node_modules — the request path is only ever a Map
-// key, never joined into a filesystem path, so there is no traversal surface. markdown-it
-// ships no single-file ESM bundle (its ESM entry is a multi-file graph), so we serve its
-// self-contained UMD bundle, which sets window.markdownit for the browser (see index.html).
+// key, never joined into a filesystem path, so there is no traversal surface. We serve
+// markdown-it's self-contained UMD bundle, which sets window.markdownit for the browser
+// (see index.html). markdown-it 15 moved it behind the `markdown-it/browser` export
+// (dist/browser/markdown-it.umd.min.js) and sealed the package with an exports map, so
+// the 14.x deep path is tried second, only for a lockfile still on that line.
 const require = createRequire(import.meta.url);
-function resolveVendor(specifier) {
-  try {
-    return require.resolve(specifier);
-  } catch {
-    return null; // not installed — the /vendor route 404s and the renderer degrades safely
+function resolveVendor(...specifiers) {
+  for (const specifier of specifiers) {
+    try {
+      return require.resolve(specifier);
+    } catch {
+      // not resolvable under this markdown-it major — try the next spelling
+    }
   }
+  return null; // not installed — the /vendor route 404s and the renderer degrades safely
 }
+const MARKDOWN_IT_UMD = resolveVendor('markdown-it/browser', 'markdown-it/dist/markdown-it.min.js');
 const VENDOR_ROUTES = new Map(
   [
-    ['/vendor/markdown-it.min.js', resolveVendor('markdown-it/dist/markdown-it.min.js')],
-    ['/vendor/markdown-it.min.js.map', resolveVendor('markdown-it/dist/markdown-it.min.js.map')],
+    ['/vendor/markdown-it.min.js', MARKDOWN_IT_UMD],
+    // The source map sits next to the bundle but is not itself exported, so it is
+    // derived from the resolved bundle path rather than resolved by specifier.
+    ['/vendor/markdown-it.min.js.map', MARKDOWN_IT_UMD === null ? null : `${MARKDOWN_IT_UMD}.map`],
   ].filter(([, file]) => file !== null)
 );
 
