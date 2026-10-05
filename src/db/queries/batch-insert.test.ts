@@ -148,6 +148,33 @@ describe('insertRowsInChunks', () => {
     expect(query.mock.calls[2]).toEqual(['INSERT INTO widgets (id) VALUES ($1)', ['r5']]);
   });
 
+  // #692: `table` and column names/casts are interpolated into the SQL text
+  // (identifiers cannot be bind parameters). Every caller passes a literal
+  // today; this makes that a checked precondition instead of a convention.
+  it.each([
+    ['table', { table: 'widgets; DROP TABLE specs', columns: [{ name: 'id' }] }],
+    ['column name', { table: 'widgets', columns: [{ name: 'id) VALUES (1); --' }] }],
+    ['column cast', { table: 'widgets', columns: [{ name: 'id', cast: 'jsonb); --' }] }],
+  ])(
+    'batch-insert: an unsafe SQL identifier in %s is refused before any query runs',
+    async (_, bad) => {
+      const query = vi.fn().mockResolvedValue({ rows: [] });
+      const { insertRowsInChunks } = await import('./batch-insert.js');
+
+      await expect(
+        insertRowsInChunks({
+          db: { query },
+          ...bad,
+          rows: ['r1'],
+          toParams: (row: string) => [row],
+          idOf: (row: string) => row,
+          buildErrorMessage: () => 'unreachable',
+        })
+      ).rejects.toThrow(/unsafe SQL identifier/);
+      expect(query).not.toHaveBeenCalled();
+    }
+  );
+
   it('is fail-fast: aborts remaining chunks on the first rejection', async () => {
     const query = vi
       .fn()

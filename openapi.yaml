@@ -1637,6 +1637,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1783,9 +1785,7 @@ paths:
               required: [holder]
               properties:
                 holder:
-                  type: string
-                  minLength: 1
-                  description: Caller identity label (authenticated identity once #43 lands).
+                  $ref: '#/components/schemas/LockHolder'
                 ttlSeconds:
                   type: integer
                   minimum: 1
@@ -1842,8 +1842,7 @@ paths:
               required: [holder]
               properties:
                 holder:
-                  type: string
-                  minLength: 1
+                  $ref: '#/components/schemas/LockHolder'
       responses:
         '200':
           description: Lock released
@@ -5592,16 +5591,8 @@ paths:
         (e.g. a slash in A653/A653M).
       tags: [standards]
       parameters:
-        - name: orgCode
-          in: path
-          required: true
-          description: Standards organization code (e.g. ASTM); normalized to uppercase.
-          schema: { type: string, minLength: 1 }
-        - name: standardCode
-          in: path
-          required: true
-          description: Standard identifier within the org (e.g. C150). Percent-encode reserved chars.
-          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/StandardOrgCode'
+        - $ref: '#/components/parameters/StandardCode'
       requestBody:
         required: false
         content:
@@ -6320,6 +6311,29 @@ paths:
 
 components:
   parameters:
+    StandardOrgCode:
+      name: orgCode
+      in: path
+      required: true
+      description: >
+        Standards organization code (e.g. ASTM); normalized to uppercase.
+        Bounded in Unicode code points; the bound applies to the trimmed value.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 50
+    StandardCode:
+      name: standardCode
+      in: path
+      required: true
+      description: >
+        Standard identifier within the org (e.g. C150). Percent-encode reserved
+        chars. Bounded in Unicode code points; the bound applies to the trimmed
+        (decoded) value.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
     SpecId:
       name: id
       in: path
@@ -6502,6 +6516,15 @@ components:
 
   schemas:
     # ── Shared field schemas ───────────────────────────────────────────────────
+
+    LockHolder:
+      type: string
+      minLength: 1
+      maxLength: 200
+      description: >
+        Caller identity label for an advisory lock (authenticated identity once
+        #43 lands). Stored verbatim (not trimmed); bounded in Unicode code
+        points.
 
     ActorLabel:
       type: string

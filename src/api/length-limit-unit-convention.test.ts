@@ -26,6 +26,7 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
+  AcquireLockBodySchema,
   ActorLabelSchema,
   HeaderFooterFieldShape,
   LanguageRulesWriteSchema,
@@ -35,14 +36,16 @@ import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
 import { MAX_LABEL_LENGTH } from '../lib/label-length.js';
 import {
   MAX_CURRENT_VERSION_LENGTH,
+  MAX_ORG_CODE_LENGTH,
   MAX_SOURCE_URL_LENGTH,
+  MAX_STANDARD_CODE_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_NOTES_LENGTH,
 } from '../lib/standards-verification-length.js';
 import { LENGTH_UNIT_META_KEY, CODE_POINT_LENGTH_UNIT } from '../lib/length-limit.js';
 import { loadRawSpec } from '../test-utils/contract/validate-response.js';
 import { collectLengthFields, type LengthField } from '../test-utils/contract/length-fields.js';
-import { VerificationBodySchema } from './standards.js';
+import { VerificationBodySchema, StandardKeyParamsSchema } from './standards.js';
 import { ResolveUserBody } from './users.js';
 import { ResolveUserShape } from '../mcp/users-handlers.js';
 import { RecordStandardVerificationShape } from '../mcp/standards-handlers.js';
@@ -221,6 +224,30 @@ const BOUND_SITES: readonly BoundSite[] = [
     max: MAX_NOTES_LENGTH,
     accepts: succeeds((value) => VerificationBodySchema.shape.notes.safeParse(value)),
     field: VerificationBodySchema.shape.notes,
+    probe: astralOfCodePointLength,
+  },
+  {
+    name: 'LockHolder (acquire + release share the component)',
+    pathEndsWith: 'components.schemas.LockHolder',
+    max: MAX_LABEL_LENGTH,
+    accepts: succeeds((value) => AcquireLockBodySchema.shape.holder.safeParse(value)),
+    field: AcquireLockBodySchema.shape.holder,
+    probe: astralOfCodePointLength,
+  },
+  {
+    name: 'PUT /standards/{orgCode}/{standardCode} orgCode path param',
+    pathEndsWith: 'components.parameters.StandardOrgCode.schema',
+    max: MAX_ORG_CODE_LENGTH,
+    accepts: succeeds((value) => StandardKeyParamsSchema.shape.orgCode.safeParse(value)),
+    field: StandardKeyParamsSchema.shape.orgCode,
+    probe: astralOfCodePointLength,
+  },
+  {
+    name: 'PUT /standards/{orgCode}/{standardCode} standardCode path param',
+    pathEndsWith: 'components.parameters.StandardCode.schema',
+    max: MAX_STANDARD_CODE_LENGTH,
+    accepts: succeeds((value) => StandardKeyParamsSchema.shape.standardCode.safeParse(value)),
+    field: StandardKeyParamsSchema.shape.standardCode,
     probe: astralOfCodePointLength,
   },
 ];
@@ -420,6 +447,20 @@ const MCP_TWIN_SITES: readonly McpTwinSite[] = [
     expectedMax: MAX_NOTES_LENGTH,
     field: RecordStandardVerificationShape.notes,
     restField: VerificationBodySchema.shape.notes,
+    probe: astralOfCodePointLength,
+  },
+  {
+    name: 'record_standard_verification.orgCode',
+    expectedMax: MAX_ORG_CODE_LENGTH,
+    field: RecordStandardVerificationShape.orgCode,
+    restField: StandardKeyParamsSchema.shape.orgCode,
+    probe: astralOfCodePointLength,
+  },
+  {
+    name: 'record_standard_verification.standardCode',
+    expectedMax: MAX_STANDARD_CODE_LENGTH,
+    field: RecordStandardVerificationShape.standardCode,
+    restField: StandardKeyParamsSchema.shape.standardCode,
     probe: astralOfCodePointLength,
   },
 ];

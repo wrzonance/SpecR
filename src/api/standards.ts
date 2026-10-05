@@ -12,7 +12,9 @@ import { logger } from '../lib/logger.js';
 import { codePointMax } from '../lib/length-limit.js';
 import {
   MAX_CURRENT_VERSION_LENGTH,
+  MAX_ORG_CODE_LENGTH,
   MAX_SOURCE_URL_LENGTH,
+  MAX_STANDARD_CODE_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_NOTES_LENGTH,
 } from '../lib/standards-verification-length.js';
@@ -30,6 +32,14 @@ export const VerificationBodySchema = z.object({
   sourceUrl: codePointMax(z.url(), MAX_SOURCE_URL_LENGTH).nullish(),
   title: codePointMax(z.string().trim().min(1), MAX_TITLE_LENGTH).nullish(),
   notes: codePointMax(z.string(), MAX_NOTES_LENGTH).nullish(),
+});
+
+// The registry key carried in the path (#692). Trimmed and non-blank, matching
+// the query layer's normalizeVerificationKey, and bounded so one PUT cannot
+// upsert a row keyed on an arbitrarily long string (the columns are bare text).
+export const StandardKeyParamsSchema = z.object({
+  orgCode: codePointMax(z.string().trim().min(1), MAX_ORG_CODE_LENGTH),
+  standardCode: codePointMax(z.string().trim().min(1), MAX_STANDARD_CODE_LENGTH),
 });
 
 async function respondRollup(
@@ -64,11 +74,11 @@ export async function getLibraryStandardsHandler(req: Request, res: Response): P
 }
 
 function parseKey(req: Request): { orgCode: string; standardCode: string } | null {
-  const orgCode = req.params['orgCode'];
-  const standardCode = req.params['standardCode'];
-  if (typeof orgCode !== 'string' || typeof standardCode !== 'string') return null;
-  if (orgCode.trim() === '' || standardCode.trim() === '') return null;
-  return { orgCode, standardCode };
+  const key = StandardKeyParamsSchema.safeParse({
+    orgCode: req.params['orgCode'],
+    standardCode: req.params['standardCode'],
+  });
+  return key.success ? key.data : null;
 }
 
 export async function recordStandardVerificationHandler(
@@ -77,7 +87,12 @@ export async function recordStandardVerificationHandler(
 ): Promise<void> {
   const key = parseKey(req);
   if (key === null) {
-    res.status(400).json({ success: false, error: 'orgCode and standardCode are required' });
+    res.status(400).json({
+      success: false,
+      error:
+        `orgCode (1-${MAX_ORG_CODE_LENGTH}) and standardCode (1-${MAX_STANDARD_CODE_LENGTH}) ` +
+        'are required',
+    });
     return;
   }
   // Body is optional (OpenAPI requestBody.required=false, ADR-064 §3): only a

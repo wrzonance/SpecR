@@ -63,9 +63,13 @@ interface HeaderFooterRow {
   readonly updated_at: Date;
 }
 
+// Interpolated into SQL text as an identifier (never a bind parameter), so it
+// is a closed set of literals rather than `string` (#692).
+type ScopeColumn = 'client_library_id' | 'project_id' | 'package_id' | 'revision_id';
+
 interface ScopeTarget {
   readonly kind: HeaderFooterScope['kind'];
-  readonly column: string;
+  readonly column: ScopeColumn;
   readonly value: string;
 }
 
