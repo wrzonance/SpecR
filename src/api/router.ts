@@ -182,7 +182,9 @@ import {
 import { registerCheckpointRoutes } from './checkpoint-routes.js';
 import { registerLanguageRuleRoutes } from './language-rule-router.js';
 
-const parseRateLimit = rateLimit({
+// Exported so router-upload-rate-limit.test.ts can require it ahead of multer on
+// every upload route (#692).
+export const parseRateLimit = rateLimit({
   windowMs: config.RATE_LIMIT_WINDOW_MS,
   // Read live per request so a runtime change to config.RATE_LIMIT_UPLOAD_MAX takes effect
   // on the next request (see src/lib/env.ts). Limiting is skipped in tests and whenever it
@@ -225,7 +227,7 @@ router.post(
 );
 router.delete('/specs/:id/style-source', clearStyleSourceHandler);
 router.post('/specs/:id/generate', generateHandler);
-router.post('/specs/:id/diff', upload.single('file'), diffHandler);
+router.post('/specs/:id/diff', parseRateLimit, upload.single('file'), diffHandler);
 router.post('/specs/:id/merge', mergeHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects', listProjectsHandler);

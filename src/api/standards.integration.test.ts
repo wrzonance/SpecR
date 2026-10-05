@@ -6,6 +6,10 @@ import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool } from '../db/index.js';
 import { assertResponse } from '../test-utils/contract/validate-response.js';
+import {
+  MAX_ORG_CODE_LENGTH,
+  MAX_STANDARD_CODE_LENGTH,
+} from '../lib/standards-verification-length.js';
 
 const suffix = randomUUID().slice(0, 8);
 const ORG = `TSTB${suffix.toUpperCase()}`; // synthetic org isolates registry writes
@@ -165,6 +169,24 @@ describe('PUT /standards/{orgCode}/{standardCode}', () => {
     ).json()) as RollupBody;
     const row = rollup.data.standards.find((s) => s.standardCode === 'A653/A653M');
     expect(row?.status).toBe('current');
+  });
+
+  // #692: the key segments were unbounded, so a single PUT could upsert a
+  // registry row keyed on an arbitrarily long string.
+  it('standards: over-length orgCode is rejected → 400, no registry row written', async () => {
+    const longOrg = `${ORG}${'X'.repeat(MAX_ORG_CODE_LENGTH)}`;
+    const res = await fetch(`${baseUrl}/standards/${longOrg}/C150`, { method: 'PUT' });
+    expect(res.status).toBe(400);
+    const rows = await pool.query(`SELECT 1 FROM standards WHERE org_code = $1`, [longOrg]);
+    expect(rows.rowCount).toBe(0);
+  });
+
+  it('standards: over-length standardCode is rejected → 400, no registry row written', async () => {
+    const longCode = 'C'.repeat(MAX_STANDARD_CODE_LENGTH + 1);
+    const res = await fetch(`${baseUrl}/standards/${ORG}/${longCode}`, { method: 'PUT' });
+    expect(res.status).toBe(400);
+    const rows = await pool.query(`SELECT 1 FROM standards WHERE standard_code = $1`, [longCode]);
+    expect(rows.rowCount).toBe(0);
   });
 
   it('an invalid body (bad status enum) returns 422', async () => {

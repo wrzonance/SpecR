@@ -11,7 +11,9 @@ import { logger } from '../lib/logger.js';
 import { codePointMax } from '../lib/length-limit.js';
 import {
   MAX_CURRENT_VERSION_LENGTH,
+  MAX_ORG_CODE_LENGTH,
   MAX_SOURCE_URL_LENGTH,
+  MAX_STANDARD_CODE_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_NOTES_LENGTH,
 } from '../lib/standards-verification-length.js';
@@ -30,12 +32,15 @@ const ListProjectStandardsArgs = z.object(ListProjectStandardsShape);
 export const RecordStandardVerificationShape = {
   // trim before min(1): a whitespace-only code trims to '' downstream, colliding
   // with the org-only key ADR-064 §2 reserves for ambiguous citations.
-  orgCode: z
-    .string()
-    .trim()
-    .min(1)
-    .describe('Standards org code, e.g. ASTM (normalized to uppercase)'),
-  standardCode: z.string().trim().min(1).describe('Standard identifier within the org, e.g. C150'),
+  // Bounded (#692) to the same code-point ceilings as the REST path segments
+  // (StandardKeyParamsSchema, src/api/standards.ts); uppercased first for the
+  // same reason — the stored form is uppercase and may be longer than the raw one.
+  orgCode: codePointMax(z.string().trim().toUpperCase().min(1), MAX_ORG_CODE_LENGTH, {
+    description: 'Standards org code, e.g. ASTM (normalized to uppercase)',
+  }),
+  standardCode: codePointMax(z.string().trim().min(1), MAX_STANDARD_CODE_LENGTH, {
+    description: 'Standard identifier within the org, e.g. C150',
+  }),
   status: z
     .enum(['current', 'superseded', 'withdrawn', 'unknown'])
     .optional()

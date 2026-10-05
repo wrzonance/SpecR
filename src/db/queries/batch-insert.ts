@@ -29,6 +29,25 @@ export interface ChunkFailureContext {
   readonly ids: readonly string[];
 }
 
+// `table`, column names and casts land in the SQL TEXT — identifiers cannot be
+// bind parameters. Every caller passes a literal; this makes that a checked
+// precondition (#692) so a future caller cannot route request data into one.
+const SQL_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
+
+function assertSqlIdentifier(value: string, role: string): void {
+  if (!SQL_IDENTIFIER.test(value)) {
+    throw new DatabaseError(`insertRowsInChunks: unsafe SQL identifier for ${role}`);
+  }
+}
+
+function assertSqlIdentifiers(table: string, columns: readonly ColumnSpec[]): void {
+  assertSqlIdentifier(table, 'table');
+  for (const column of columns) {
+    assertSqlIdentifier(column.name, 'column name');
+    if (column.cast !== undefined) assertSqlIdentifier(column.cast, 'column cast');
+  }
+}
+
 /** How many rows of `columnsPerRow` columns each fit in one statement before
  *  crossing `paramLimit` (default {@link POSTGRES_MAX_BIND_PARAMS}) bind
  *  parameters. Throws `RangeError` for a non-positive `columnsPerRow` —
@@ -107,6 +126,7 @@ export async function insertRowsInChunks<T>(args: {
 }): Promise<void> {
   const { db, table, columns, rows, toParams, idOf, buildErrorMessage, paramLimit } = args;
   if (rows.length === 0) return;
+  assertSqlIdentifiers(table, columns);
 
   const chunkSize = maxRowsPerStatement(columns.length, paramLimit);
   const chunks = chunkRows(rows, chunkSize);

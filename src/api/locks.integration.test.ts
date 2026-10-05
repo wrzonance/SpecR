@@ -4,6 +4,7 @@ import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool } from '../db/index.js';
+import { MAX_LABEL_LENGTH } from '../lib/label-length.js';
 
 const ZERO = '00000000-0000-0000-0000-000000000000';
 const HOLDER_A = 'user:alice';
@@ -103,6 +104,24 @@ describe('lock endpoints (integration)', () => {
 
   it('acquire without a holder → 400', async () => {
     const res = await lockReq('PUT', {});
+    expect(res.status).toBe(400);
+  });
+
+  // #692: holder had a minimum but no maximum, so one request could store an
+  // arbitrarily long label and echo it back in every 409.
+  it('lock: over-length holder is rejected on acquire → 400, nothing stored', async () => {
+    const res = await lockReq('PUT', { holder: 'x'.repeat(MAX_LABEL_LENGTH + 1) });
+    expect(res.status).toBe(400);
+    expect(((await lockReq('GET')).body.data as { locked: boolean }).locked).toBe(false);
+  });
+
+  it('lock: a holder of exactly the maximum length is accepted', async () => {
+    const res = await lockReq('PUT', { holder: 'x'.repeat(MAX_LABEL_LENGTH) });
+    expect(res.status).toBe(200);
+  });
+
+  it('lock: over-length holder is rejected on release → 400', async () => {
+    const res = await lockReq('DELETE', { holder: 'x'.repeat(MAX_LABEL_LENGTH + 1) });
     expect(res.status).toBe(400);
   });
 });

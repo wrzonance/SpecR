@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { SectionNumberInputSchema } from '../lib/section-number.js';
+import { codePointMax } from '../lib/length-limit.js';
+import { MAX_LABEL_LENGTH } from '../lib/label-length.js';
 import { ActorLabelSchema } from './actor-schemas.js';
 
 export const PatchSpecBodySchema = z.object({
@@ -24,16 +26,20 @@ export type UpdateParagraphBody = z.infer<typeof UpdateParagraphBodySchema>;
 // Advisory soft-lock acquire/release (ADR-018 D2). `holder` is a caller-supplied
 // identity label until auth (#43) supplies an authenticated one. `ttlSeconds`
 // caps at 1 hour so a single acquire can never wedge a spec for an unreasonable
-// time before it is stealable; omitted → server default (15 min).
+// time before it is stealable; omitted → server default (15 min). `holder` is
+// bounded like every other identity label (#692): it is stored and echoed back
+// in each 409, so an unbounded one is a free amplification.
+const LockHolderSchema = codePointMax(z.string().check(z.minLength(1)), MAX_LABEL_LENGTH);
+
 export const AcquireLockBodySchema = z.object({
-  holder: z.string().check(z.minLength(1)),
+  holder: LockHolderSchema,
   ttlSeconds: z.number().int().min(1).max(3600).exactOptional(),
 });
 
 export type AcquireLockBody = z.infer<typeof AcquireLockBodySchema>;
 
 export const ReleaseLockBodySchema = z.object({
-  holder: z.string().check(z.minLength(1)),
+  holder: LockHolderSchema,
 });
 
 export type ReleaseLockBody = z.infer<typeof ReleaseLockBodySchema>;

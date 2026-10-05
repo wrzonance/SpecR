@@ -26,6 +26,7 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
+  AcquireLockBodySchema,
   ActorLabelSchema,
   HeaderFooterFieldShape,
   LanguageRulesWriteSchema,
@@ -35,14 +36,16 @@ import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
 import { MAX_LABEL_LENGTH } from '../lib/label-length.js';
 import {
   MAX_CURRENT_VERSION_LENGTH,
+  MAX_ORG_CODE_LENGTH,
   MAX_SOURCE_URL_LENGTH,
+  MAX_STANDARD_CODE_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_NOTES_LENGTH,
 } from '../lib/standards-verification-length.js';
 import { LENGTH_UNIT_META_KEY, CODE_POINT_LENGTH_UNIT } from '../lib/length-limit.js';
 import { loadRawSpec } from '../test-utils/contract/validate-response.js';
 import { collectLengthFields, type LengthField } from '../test-utils/contract/length-fields.js';
-import { VerificationBodySchema } from './standards.js';
+import { VerificationBodySchema, StandardKeyParamsSchema } from './standards.js';
 import { ResolveUserBody } from './users.js';
 import { ResolveUserShape } from '../mcp/users-handlers.js';
 import { RecordStandardVerificationShape } from '../mcp/standards-handlers.js';
@@ -223,6 +226,30 @@ const BOUND_SITES: readonly BoundSite[] = [
     field: VerificationBodySchema.shape.notes,
     probe: astralOfCodePointLength,
   },
+  {
+    name: 'LockHolder (acquire + release share the component)',
+    pathEndsWith: 'components.schemas.LockHolder',
+    max: MAX_LABEL_LENGTH,
+    accepts: succeeds((value) => AcquireLockBodySchema.shape.holder.safeParse(value)),
+    field: AcquireLockBodySchema.shape.holder,
+    probe: astralOfCodePointLength,
+  },
+  {
+    name: 'PUT /standards/{orgCode}/{standardCode} orgCode path param',
+    pathEndsWith: 'components.parameters.StandardOrgCode.schema',
+    max: MAX_ORG_CODE_LENGTH,
+    accepts: succeeds((value) => StandardKeyParamsSchema.shape.orgCode.safeParse(value)),
+    field: StandardKeyParamsSchema.shape.orgCode,
+    probe: astralOfCodePointLength,
+  },
+  {
+    name: 'PUT /standards/{orgCode}/{standardCode} standardCode path param',
+    pathEndsWith: 'components.parameters.StandardCode.schema',
+    max: MAX_STANDARD_CODE_LENGTH,
+    accepts: succeeds((value) => StandardKeyParamsSchema.shape.standardCode.safeParse(value)),
+    field: StandardKeyParamsSchema.shape.standardCode,
+    probe: astralOfCodePointLength,
+  },
 ];
 
 describe('openapi.yaml bounds match the imported constant and what Zod enforces, in Unicode code points (#642)', () => {
@@ -366,6 +393,36 @@ describe('trimmed bounds count the trimmed value, untrimmed bounds count the raw
   });
 });
 
+// ── Case-expanding bounds: orgCode counts the uppercased value ───────────────
+
+// The registry stores orgCode uppercased (normalizeVerificationKey). Unicode
+// uppercasing can EXPAND: 'ﬃ' (U+FB03, one code point) becomes 'FFI' (three).
+// Bounding the raw value would let 50 ligatures through, store 150 code points,
+// and return an orgCode the same endpoint then refuses — so the bound must
+// count the value as it will be stored (#692 adversarial review).
+describe('orgCode bound counts the uppercased value, on REST and MCP (#692)', () => {
+  const LIGATURE = 'ﬃ';
+  const expandsTo = [...LIGATURE.toUpperCase()].length;
+  const overAfterExpansion = LIGATURE.repeat(Math.floor(MAX_ORG_CODE_LENGTH / expandsTo) + 1);
+  const underAfterExpansion = LIGATURE.repeat(Math.floor(MAX_ORG_CODE_LENGTH / expandsTo));
+
+  it('the probe really expands under toUpperCase (guards against a vacuous test)', () => {
+    expect(expandsTo).toBeGreaterThan(1);
+    expect([...overAfterExpansion].length).toBeLessThanOrEqual(MAX_ORG_CODE_LENGTH);
+    expect([...overAfterExpansion.toUpperCase()].length).toBeGreaterThan(MAX_ORG_CODE_LENGTH);
+  });
+
+  it.each([
+    ['REST StandardKeyParamsSchema.orgCode', StandardKeyParamsSchema.shape.orgCode],
+    ['MCP record_standard_verification.orgCode', RecordStandardVerificationShape.orgCode],
+  ])('%s: rejects a value that only exceeds the bound after uppercasing', (_, field) => {
+    expect(field.safeParse(overAfterExpansion).success).toBe(false);
+    const ok = field.safeParse(underAfterExpansion);
+    expect(ok.success).toBe(true);
+    if (ok.success) expect(ok.data).toBe(underAfterExpansion.toUpperCase());
+  });
+});
+
 // ── MCP twins ───────────────────────────────────────────────────────────────
 
 // Note-presence across the WHOLE MCP surface is asserted by the invariant sweep
@@ -422,6 +479,20 @@ const MCP_TWIN_SITES: readonly McpTwinSite[] = [
     restField: VerificationBodySchema.shape.notes,
     probe: astralOfCodePointLength,
   },
+  {
+    name: 'record_standard_verification.orgCode',
+    expectedMax: MAX_ORG_CODE_LENGTH,
+    field: RecordStandardVerificationShape.orgCode,
+    restField: StandardKeyParamsSchema.shape.orgCode,
+    probe: astralOfCodePointLength,
+  },
+  {
+    name: 'record_standard_verification.standardCode',
+    expectedMax: MAX_STANDARD_CODE_LENGTH,
+    field: RecordStandardVerificationShape.standardCode,
+    restField: StandardKeyParamsSchema.shape.standardCode,
+    probe: astralOfCodePointLength,
+  },
 ];
 
 describe('MCP tool shapes — twin length bounds stay identical to their REST counterparts, in code points (#642)', () => {
@@ -470,6 +541,9 @@ describe('MCP tool shapes — twin length bounds stay identical to their REST co
     'trailing\n',
     '  https://example.com/x  ',
     'https://example.com/x',
+    // Case-folding probe: orgCode is uppercased on both surfaces (#692 review).
+    'astm',
+    'ﬃ',
   ];
 
   it.each(MCP_TWIN_SITES)(
