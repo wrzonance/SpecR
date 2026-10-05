@@ -6317,7 +6317,8 @@ components:
       required: true
       description: >
         Standards organization code (e.g. ASTM); normalized to uppercase.
-        Bounded in Unicode code points; the bound applies to the trimmed value.
+        Bounded in Unicode code points; the bound applies to the trimmed,
+        uppercased value.
       schema:
         type: string
         minLength: 1

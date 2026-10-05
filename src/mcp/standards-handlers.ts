@@ -33,8 +33,9 @@ export const RecordStandardVerificationShape = {
   // trim before min(1): a whitespace-only code trims to '' downstream, colliding
   // with the org-only key ADR-064 §2 reserves for ambiguous citations.
   // Bounded (#692) to the same code-point ceilings as the REST path segments
-  // (StandardKeyParamsSchema, src/api/standards.ts).
-  orgCode: codePointMax(z.string().trim().min(1), MAX_ORG_CODE_LENGTH, {
+  // (StandardKeyParamsSchema, src/api/standards.ts); uppercased first for the
+  // same reason — the stored form is uppercase and may be longer than the raw one.
+  orgCode: codePointMax(z.string().trim().toUpperCase().min(1), MAX_ORG_CODE_LENGTH, {
     description: 'Standards org code, e.g. ASTM (normalized to uppercase)',
   }),
   standardCode: codePointMax(z.string().trim().min(1), MAX_STANDARD_CODE_LENGTH, {

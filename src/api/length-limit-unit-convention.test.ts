@@ -393,6 +393,36 @@ describe('trimmed bounds count the trimmed value, untrimmed bounds count the raw
   });
 });
 
+// ── Case-expanding bounds: orgCode counts the uppercased value ───────────────
+
+// The registry stores orgCode uppercased (normalizeVerificationKey). Unicode
+// uppercasing can EXPAND: 'ﬃ' (U+FB03, one code point) becomes 'FFI' (three).
+// Bounding the raw value would let 50 ligatures through, store 150 code points,
+// and return an orgCode the same endpoint then refuses — so the bound must
+// count the value as it will be stored (#692 adversarial review).
+describe('orgCode bound counts the uppercased value, on REST and MCP (#692)', () => {
+  const LIGATURE = 'ﬃ';
+  const expandsTo = [...LIGATURE.toUpperCase()].length;
+  const overAfterExpansion = LIGATURE.repeat(Math.floor(MAX_ORG_CODE_LENGTH / expandsTo) + 1);
+  const underAfterExpansion = LIGATURE.repeat(Math.floor(MAX_ORG_CODE_LENGTH / expandsTo));
+
+  it('the probe really expands under toUpperCase (guards against a vacuous test)', () => {
+    expect(expandsTo).toBeGreaterThan(1);
+    expect([...overAfterExpansion].length).toBeLessThanOrEqual(MAX_ORG_CODE_LENGTH);
+    expect([...overAfterExpansion.toUpperCase()].length).toBeGreaterThan(MAX_ORG_CODE_LENGTH);
+  });
+
+  it.each([
+    ['REST StandardKeyParamsSchema.orgCode', StandardKeyParamsSchema.shape.orgCode],
+    ['MCP record_standard_verification.orgCode', RecordStandardVerificationShape.orgCode],
+  ])('%s: rejects a value that only exceeds the bound after uppercasing', (_, field) => {
+    expect(field.safeParse(overAfterExpansion).success).toBe(false);
+    const ok = field.safeParse(underAfterExpansion);
+    expect(ok.success).toBe(true);
+    if (ok.success) expect(ok.data).toBe(underAfterExpansion.toUpperCase());
+  });
+});
+
 // ── MCP twins ───────────────────────────────────────────────────────────────
 
 // Note-presence across the WHOLE MCP surface is asserted by the invariant sweep
@@ -511,6 +541,9 @@ describe('MCP tool shapes — twin length bounds stay identical to their REST co
     'trailing\n',
     '  https://example.com/x  ',
     'https://example.com/x',
+    // Case-folding probe: orgCode is uppercased on both surfaces (#692 review).
+    'astm',
+    'ﬃ',
   ];
 
   it.each(MCP_TWIN_SITES)(

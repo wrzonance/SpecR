@@ -37,8 +37,11 @@ export const VerificationBodySchema = z.object({
 // The registry key carried in the path (#692). Trimmed and non-blank, matching
 // the query layer's normalizeVerificationKey, and bounded so one PUT cannot
 // upsert a row keyed on an arbitrarily long string (the columns are bare text).
+// orgCode is uppercased BEFORE the bound: the registry stores it uppercased,
+// and Unicode uppercasing can expand ('ﬃ' → 'FFI'), so bounding the raw value
+// would admit a key the stored form exceeds.
 export const StandardKeyParamsSchema = z.object({
-  orgCode: codePointMax(z.string().trim().min(1), MAX_ORG_CODE_LENGTH),
+  orgCode: codePointMax(z.string().trim().toUpperCase().min(1), MAX_ORG_CODE_LENGTH),
   standardCode: codePointMax(z.string().trim().min(1), MAX_STANDARD_CODE_LENGTH),
 });
 
