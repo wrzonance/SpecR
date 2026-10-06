@@ -48,9 +48,15 @@
     <!-- Reproducible restores: packages.lock.json is the record; CI restores
          in locked mode so an unreviewed graph change fails the build. -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <!-- A transitive dependency demanding a higher version than a direct pin
-         (NU1605) must stop the build, not quietly resolve upward. -->
-    <WarningsAsErrors>$(WarningsAsErrors);NU1605</WarningsAsErrors>
+    <!-- NuGet's vulnerability audit covers the whole graph, not just direct
+         references. Restore fails, rather than warning, on a known advisory
+         (NU1901–NU1904, any severity) and on a transitive dependency that
+         demands a higher version than a direct pin (NU1605). Neither
+         Dependabot (actions only here) nor Renovate gates NuGet on advisories. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1605;NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
     <!-- Same bar locally as in CI. -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
