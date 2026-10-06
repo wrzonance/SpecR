@@ -61,19 +61,6 @@
       "allowedVersions": "<19"
     },
     {
-      "description": "Revit add-in (ADR-094): the net48 leg must stay on Refit 7.x + System.Text.Json 8.x \u2014 every Refit >= 9 requires System.Text.Json >= 9/10 on .NET Framework, which NU1605-collides with the 8.x pin that is known to load in Revit 2024 (#589, #688). Bounded so the pair stops being re-proposed; the .NET 8/10 legs declare Refit 16.x separately and keep receiving updates. Lift together, after a Revit 2024 host test.",
-      "matchManagers": ["nuget"],
-      "matchPackageNames": ["Refit"],
-      "matchCurrentVersion": "<8.0.0",
-      "allowedVersions": "<8.0.0"
-    },
-    {
-      "description": "Revit add-in (ADR-094): System.Text.Json is referenced only on the net48 leg and stays on the serviced 8.x line (#589). Bounded, not disabled, so 8.x security patches still flow.",
-      "matchManagers": ["nuget"],
-      "matchPackageNames": ["System.Text.Json"],
-      "allowedVersions": "<9.0.0"
-    },
-    {
       "matchManagers": ["github-actions"],
       "labels": ["ci"],
       "commitMessagePrefix": "chore(ci):",

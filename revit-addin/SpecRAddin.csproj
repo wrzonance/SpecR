@@ -35,6 +35,10 @@
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
     <Platforms>x64</Platforms>
+    <!-- Revit is x64-only; the output layout is bin/<Configuration>/<tfm>/
+         whether the build goes through the .sln (Platform=x64) or the .csproj. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <!-- Lets the -windows legs restore and compile on Linux/macOS runners. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
@@ -45,10 +49,10 @@
          in locked mode so an unreviewed graph change fails the build. -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <!-- A transitive dependency demanding a higher version than a direct pin
-         (NU1605) must stop the build, not quietly resolve upward — this is
-         what keeps an unconditional Refit bump from silently dragging
-         System.Text.Json 10.x into the .NET Framework leg. -->
+         (NU1605) must stop the build, not quietly resolve upward. -->
     <WarningsAsErrors>$(WarningsAsErrors);NU1605</WarningsAsErrors>
+    <!-- Same bar locally as in CI. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <!-- ── Revit year ⇄ runtime leg ─────────────────────────────────────── -->
@@ -125,17 +129,16 @@
     <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="$(RevitApiVersion)" />
   </ItemGroup>
 
-  <!-- Typed REST client + JSON, pinned per leg. NuGet resolves each target
-       framework as an independent graph, so the two Refit lines never meet.
-       net48 stays on the Refit 7.x / System.Text.Json 8.x pair that is known to
-       load in Revit 2024's .NET Framework process: every Refit >= 9 requires
-       STJ >= 10.x there (NU1605 against this pin — see ADR-094). -->
-  <ItemGroup Condition=" '$(TargetFramework)' == 'net48' ">
-    <PackageReference Include="Refit" Version="7.2.22" />
-    <PackageReference Include="System.Text.Json" Version="8.0.6" />
-  </ItemGroup>
-  <ItemGroup Condition=" '$(TargetFramework)' != 'net48' ">
+  <!-- Typed REST client + JSON. One Refit for every leg. System.Text.Json is
+       referenced directly only on net48 (Refit requires >= 10.0.12 there; the
+       8.x line leaves support with .NET 8 on 2026-11-10); the .NET 8/10 legs
+       use the framework's own copy, and the direct reference would be pruned
+       to nothing there anyway (NU1510). See ADR-094. -->
+  <ItemGroup>
     <PackageReference Include="Refit" Version="16.3.0" />
+  </ItemGroup>
+  <ItemGroup Condition=" '$(TargetFramework)' == 'net48' ">
+    <PackageReference Include="System.Text.Json" Version="10.0.12" />
   </ItemGroup>
 
   <!-- Deploy the manifest next to the assembly for local install convenience. -->
