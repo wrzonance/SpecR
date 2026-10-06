@@ -185,6 +185,8 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: revit-addin/global.json
+          cache: true
+          cache-dependency-path: revit-addin/packages.lock.json
 
       - name: Restore (locked)
         working-directory: revit-addin
