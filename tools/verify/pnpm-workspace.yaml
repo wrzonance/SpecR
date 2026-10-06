@@ -35,6 +35,14 @@ overrides:
   qs@<6.16.0: '>=6.16.0 <7' # runtime, via express → body-parser (GHSA-4mjr-xmp4-gh2g, GHSA-x5fp-wj9c-mxmx)
   'js-yaml@>=4.0.0 <4.3.2': '>=4.3.2 <5' # dev, via eslint (GHSA-2883-xcg3-v3hh, GHSA-5p4m-2wfm-xmqj)
   postcss@<8.5.23: '>=8.5.23 <9' # dev, via vite (GHSA-fxqj-rqcc-2cmp)
-  # dev, via minimatch@3 (eslint). GHSA-mh99-v99m-4gvg, GHSA-rgw5-rvv9-x895 — surfaced by
-  # `pnpm audit`; the repo root already resolves 1.1.18 natively.
-  'brace-expansion@>=1.0.0 <1.1.18': '>=1.1.18 <2'
+  # dev, via minimatch@3 (eslint) and minimatch@10 (eslint-plugin-sonarjs / glob).
+  # GHSA-mh99-v99m-4gvg, GHSA-rgw5-rvv9-x895, and the 2026-09-29 trio
+  # GHSA-q2hr-2g5m-vwhr / GHSA-qhr7-859c-m2p7 / GHSA-6j4f-fj2g-mc7p (quadratic
+  # expansion + uncontrolled recursion); the q2hr floors are the highest per line.
+  'brace-expansion@>=1.0.0 <1.1.21': '>=1.1.21 <2'
+  'brace-expansion@>=5.0.0 <5.0.12': '>=5.0.12 <6'
+  # runtime, via express. GHSA-jqcg-44mw-7w3h (CVE-2026-90711, critical) — IPv4-mapped
+  # IPv6 client matched a trusted-proxy subnet, letting X-Forwarded-For spoof the client IP.
+  proxy-addr@<2.0.8: '>=2.0.8 <3'
+  # dev, via vite → postcss. GHSA-68fv-2mgg-jv7q (event-loop DoS via indexed source-map offsets).
+  source-map-js@<1.2.2: '>=1.2.2 <2'
