@@ -25,7 +25,10 @@ namespace SpecRAddin
                 var commandClass = typeof(HealthCheckCommand).FullName
                     ?? throw new InvalidOperationException("HealthCheckCommand type name unavailable");
 
-                var buttonData = new PushButtonData(
+                // PushButtonData is a disposable Revit API wrapper; the panel copies
+                // what it needs in AddItem, so the data object is released at the
+                // end of this scope (CodeQL cs/local-not-disposed).
+                using var buttonData = new PushButtonData(
                     name: "SpecRHealthCheck",
                     text: "Health\nCheck",
                     assemblyName: assemblyPath,
