@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Document, Header, Packer } from 'docx';
+import { Document, Header, Packer, Paragraph, Table, TableCell, TableRow } from 'docx';
 import JSZip from 'jszip';
 import {
   buildTable,
@@ -50,6 +50,13 @@ async function renderTableToHeaderXml(
   const file = zip.file('word/header1.xml');
   if (!file) throw new Error('header1.xml missing');
   return file.async('string');
+}
+
+/** The `<w:tblGrid>…</w:tblGrid>` element of a rendered header part. */
+function tableGridOf(xml: string): string {
+  const match = /<w:tblGrid>.*?<\/w:tblGrid>/.exec(xml);
+  if (!match) throw new Error('w:tblGrid missing');
+  return match[0];
 }
 
 describe('buildTable', () => {
@@ -115,17 +122,24 @@ describe('buildTable — round-trip fidelity', () => {
   });
 
   it('passes no columnWidths option through when table.columnWidths is absent', async () => {
-    // docx's `Table` always synthesizes its OWN default `w:tblGrid` (one
-    // `w:gridCol w:w="100"` per column) when the `columnWidths` option is
-    // omitted entirely — this is docx's own unconditional behavior, not
-    // something `buildTable` renders. The real invariant under test is that
-    // `buildTable` never passes an option here: the emitted grid is exactly
-    // docx's untouched 100-wide default, never the 3000/1500 widths the
-    // "round-trips columnWidths" case above pins when they ARE declared.
+    // docx's `Table` always synthesizes its OWN default `w:tblGrid` when the
+    // `columnWidths` option is omitted (a fixed 100-twip placeholder per column
+    // before docx 9.8; a grid derived from the section's text width since) —
+    // this is docx's own unconditional behavior, not something `buildTable`
+    // renders. The real invariant under test is that `buildTable` never passes
+    // an option here, so the emitted grid is pinned to whatever docx emits for
+    // a bare `Table` with the same shape and no `columnWidths` at all — never
+    // the 3000/1500 widths the "round-trips columnWidths" case above pins when
+    // they ARE declared. Comparing against docx's own output (instead of a
+    // literal) keeps the test honest across docx's default-grid changes.
     const table = textTable([[literalCell('A')]]);
     const built = buildTable(table, undefined, CTX);
     const xml = await renderTableToHeaderXml(built!);
-    expect(xml).toContain('<w:gridCol w:w="100"/>');
+    const control = new Table({
+      rows: [new TableRow({ children: [new TableCell({ children: [new Paragraph('A')] })] })],
+    });
+    const controlXml = await renderTableToHeaderXml(control);
+    expect(tableGridOf(xml)).toBe(tableGridOf(controlXml));
     expect(xml).not.toContain('w:w="3000"');
   });
 
