@@ -11,25 +11,25 @@
       "groupName": "npm-deps"
     },
     {
-      "description": "Security floors in pnpm-workspace.yaml `overrides` are hand-maintained, advisory-driven ranges of the form `>=patched <nextMajor` (see the comments beside each). Renovate has no business rewriting them: every rewrite so far stripped the explanatory comment blocks (#602, #606, #677) and widened the ceilings across a major (`<5` → `<6`), which is exactly the unbounded-floor shape that broke undici/js-yaml consumers in #504. New advisories are handled by editing the floor by hand in a sweep PR, not by a range bump.",
+      "description": "Security floors in pnpm-workspace.yaml `overrides` are hand-maintained, advisory-driven ranges of the form `>=patched <nextMajor` (see the comments beside each). Renovate has no business rewriting them: every rewrite so far stripped the explanatory comment blocks (#602, #606, #677) and widened the ceilings across a major (`<5` \u2192 `<6`), which is exactly the unbounded-floor shape that broke undici/js-yaml consumers in #504. New advisories are handled by editing the floor by hand in a sweep PR, not by a range bump.",
       "matchManagers": ["npm"],
       "matchDepTypes": ["pnpm-workspace.overrides"],
       "enabled": false
     },
     {
-      "description": "Major bumps for OOXML/DOCX libs require manual review — may change numbering or content control behavior",
+      "description": "Major bumps for OOXML/DOCX libs require manual review \u2014 may change numbering or content control behavior",
       "matchPackageNames": ["docx", "jszip"],
       "matchUpdateTypes": ["major"],
       "enabled": false
     },
     {
-      "description": "Node pin (ADR-081): only propose npm releases whose own engines.node overlaps ours. The constraint itself is auto-detected from engines.node and .nvmrc — deliberately NOT declared in a `constraints` block, because Renovate treats a manually-set constraint as fixed and will never offer to bump it, which would fork the source of truth. Scoped to runtime dependencies per Renovate's guidance that strict filtering across devDependencies filters far more than most users expect.",
+      "description": "Node pin (ADR-081): only propose npm releases whose own engines.node overlaps ours. The constraint itself is auto-detected from engines.node and .nvmrc \u2014 deliberately NOT declared in a `constraints` block, because Renovate treats a manually-set constraint as fixed and will never offer to bump it, which would fork the source of truth. Scoped to runtime dependencies per Renovate's guidance that strict filtering across devDependencies filters far more than most users expect.",
       "matchManagers": ["npm"],
       "matchDepTypes": ["dependencies"],
       "constraintsFiltering": "strict"
     },
     {
-      "description": "Node pin (ADR-081): never propose a Node MAJOR bump. Moving LTS majors is a deliberate coordinated change across .nvmrc, both engines.node ranges, both @types/node majors and CI — not a routine dependency PR. Minor/patch within the pinned major stays enabled.",
+      "description": "Node pin (ADR-081): never propose a Node MAJOR bump. Moving LTS majors is a deliberate coordinated change across .nvmrc, both engines.node ranges, both @types/node majors and CI \u2014 not a routine dependency PR. Minor/patch within the pinned major stays enabled.",
       "matchDepNames": ["node"],
       "matchUpdateTypes": ["major"],
       "enabled": false
@@ -40,25 +40,38 @@
       "allowedVersions": "<25.0.0"
     },
     {
-      "description": "Node pin (ADR-081): @types/node must track the runtime major. A typings-only bump past the runtime lets tsc accept APIs that do not exist at execution — exactly what PR #557 proposed (@types/node 26 against a Node 22 runtime) and why it was closed.",
+      "description": "Node pin (ADR-081): @types/node must track the runtime major. A typings-only bump past the runtime lets tsc accept APIs that do not exist at execution \u2014 exactly what PR #557 proposed (@types/node 26 against a Node 22 runtime) and why it was closed.",
       "matchPackageNames": ["@types/node"],
       "allowedVersions": "<25.0.0"
     },
     {
-      "description": "Toolchain pin: stay on TypeScript 5.x. TS 6.0 (2026-03-23) and 7.0 postdate the training cutoffs of the models doing implementation work here (Sonnet 5 / Fable 5: Jan 2026), so a compiler they cannot write against reliably is a poor trade for capability this project does not need. Declined three times (#565, #560, #593/#597/#598) — bounded so it stops being re-proposed weekly. Lift deliberately, moving root and tools/verify together.",
+      "description": "Toolchain pin: stay on TypeScript 5.x. TS 6.0 (2026-03-23) and 7.0 postdate the training cutoffs of the models doing implementation work here (Sonnet 5 / Fable 5: Jan 2026), so a compiler they cannot write against reliably is a poor trade for capability this project does not need. Declined three times (#565, #560, #593/#597/#598) \u2014 bounded so it stops being re-proposed weekly. Lift deliberately, moving root and tools/verify together.",
       "matchPackageNames": ["typescript"],
       "allowedVersions": "<6.0.0"
     },
     {
-      "description": "Toolchain pin: stay on ESLint 9.x. ESLint 10 (2026-02-06) postdates the same model cutoffs, and the flat config here is agent-edited often enough that the cost is real. Declined in #573/#559 — bounded so it stops recurring. Lift deliberately, moving root and tools/verify together.",
+      "description": "Toolchain pin: stay on ESLint 9.x. ESLint 10 (2026-02-06) postdates the same model cutoffs, and the flat config here is agent-edited often enough that the cost is real. Declined in #573/#559 \u2014 bounded so it stops recurring. Lift deliberately, moving root and tools/verify together.",
       "matchPackageNames": ["eslint"],
       "allowedVersions": "<10.0.0"
     },
     {
-      "description": "Database pin: stay on Postgres 18 (EOL 2030-11-14). The earlier block on 18 was a misdiagnosis — SQLSTATE reaches the driver fine; Postgres 18 reports an ON DELETE RESTRICT rejection as the SQL-standard restrict_violation (23001) instead of the generic foreign_key_violation (23503), which the error map did not recognise. Resolved in #599 (ADR-084) by accepting both codes. Bounded rather than unpinned so 18.x patches flow while a future major stays a deliberate, tested move — same shape as the node (<25), typescript (<6.0.0) and eslint (<10.0.0) bounds.",
+      "description": "Database pin: stay on Postgres 18 (EOL 2030-11-14). The earlier block on 18 was a misdiagnosis \u2014 SQLSTATE reaches the driver fine; Postgres 18 reports an ON DELETE RESTRICT rejection as the SQL-standard restrict_violation (23001) instead of the generic foreign_key_violation (23503), which the error map did not recognise. Resolved in #599 (ADR-084) by accepting both codes. Bounded rather than unpinned so 18.x patches flow while a future major stays a deliberate, tested move \u2014 same shape as the node (<25), typescript (<6.0.0) and eslint (<10.0.0) bounds.",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["postgres"],
       "allowedVersions": "<19"
+    },
+    {
+      "description": "Revit add-in (ADR-094): the net48 leg must stay on Refit 7.x + System.Text.Json 8.x \u2014 every Refit >= 9 requires System.Text.Json >= 9/10 on .NET Framework, which NU1605-collides with the 8.x pin that is known to load in Revit 2024 (#589, #688). Bounded so the pair stops being re-proposed; the .NET 8/10 legs declare Refit 16.x separately and keep receiving updates. Lift together, after a Revit 2024 host test.",
+      "matchManagers": ["nuget"],
+      "matchPackageNames": ["Refit"],
+      "matchCurrentVersion": "<8.0.0",
+      "allowedVersions": "<8.0.0"
+    },
+    {
+      "description": "Revit add-in (ADR-094): System.Text.Json is referenced only on the net48 leg and stays on the serviced 8.x line (#589). Bounded, not disabled, so 8.x security patches still flow.",
+      "matchManagers": ["nuget"],
+      "matchPackageNames": ["System.Text.Json"],
+      "allowedVersions": "<9.0.0"
     },
     {
       "matchManagers": ["github-actions"],

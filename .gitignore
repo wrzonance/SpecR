@@ -79,3 +79,7 @@ tools/verify/work/
 .agent/*
 !.agent/config.env
 !.agent/board.json
+
+# Revit add-in build output (dotnet build)
+revit-addin/bin/
+revit-addin/obj/

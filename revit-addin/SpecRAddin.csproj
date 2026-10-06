@@ -1,17 +1,32 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    SpecR Revit add-in (Phase 4c scaffold).
+    SpecR Revit add-in — one build, every supported Revit runtime (ADR-094).
 
-    Targets the Revit 2024 runtime (.NET Framework 4.8). Revit 2025+ moved to
-    .NET 8 — see README.md "Targeting other Revit versions" for the multi-target
-    upgrade path. The Revit API assemblies are referenced from the local install
-    and are NOT copied to the output (Private=false): Revit loads its own copies
-    at runtime, and copying them causes load conflicts.
+    Revit pins the .NET runtime per release, and an add-in compiled for one
+    runtime does not load in another:
+
+      Revit 2024          .NET Framework 4.8   net48
+      Revit 2025 / 2026   .NET 8               net8.0-windows
+      Revit 2027          .NET 10              net10.0-windows
+
+    The Revit API is referenced from NuGet (Nice3point.Revit.Api.*, MIT —
+    reference assemblies only, never copied to output), so the project
+    restores and builds on any machine or CI runner without Revit installed.
+
+      dotnet build -c Release                   # all three runtimes
+      dotnet build -c Release -p:RevitVersion=2026 \
+        -p:NuGetLockFilePath=obj/revit2026.lock.json   # one Revit year only
+
+    RevitVersion selects both the runtime leg and the exact API package year.
+    When it is not set, each leg builds against the OLDEST Revit release on its
+    runtime (2024 / 2025 / 2027), which is the build that loads in every later
+    release on the same runtime. The committed packages.lock.json covers that
+    default matrix; a single-year override resolves a different API package,
+    so point it at a throwaway lock path as shown above.
   -->
 
   <PropertyGroup>
-    <TargetFramework>net48</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
@@ -21,30 +36,106 @@
     <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
     <Platforms>x64</Platforms>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-
-    <!-- Override on the command line to point at a different Revit install, e.g.
-         dotnet build -p:RevitVersion=2025 -p:RevitApiDir="C:\Program Files\Autodesk\Revit 2025" -->
-    <RevitVersion Condition=" '$(RevitVersion)' == '' ">2024</RevitVersion>
-    <RevitApiDir Condition=" '$(RevitApiDir)' == '' ">C:\Program Files\Autodesk\Revit $(RevitVersion)</RevitApiDir>
+    <!-- Lets the -windows legs restore and compile on Linux/macOS runners. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- Revit loads the add-in from a plain folder with no restore step, so
+         every NuGet dependency must sit next to SpecRAddin.dll. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- Reproducible restores: packages.lock.json is the record; CI restores
+         in locked mode so an unreviewed graph change fails the build. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- A transitive dependency demanding a higher version than a direct pin
+         (NU1605) must stop the build, not quietly resolve upward — this is
+         what keeps an unconditional Refit bump from silently dragging
+         System.Text.Json 10.x into the .NET Framework leg. -->
+    <WarningsAsErrors>$(WarningsAsErrors);NU1605</WarningsAsErrors>
   </PropertyGroup>
 
-  <!-- Revit API — provided by the host process, never copied to output. -->
+  <!-- ── Revit year ⇄ runtime leg ─────────────────────────────────────── -->
+
+  <!-- No RevitVersion: build every runtime leg. -->
+  <PropertyGroup Condition=" '$(RevitVersion)' == '' ">
+    <TargetFrameworks>net48;net8.0-windows;net10.0-windows</TargetFrameworks>
+  </PropertyGroup>
+
+  <!-- RevitVersion given: build only the leg that Revit release runs on. -->
+  <PropertyGroup Condition=" '$(RevitVersion)' == '2024' ">
+    <TargetFramework>net48</TargetFramework>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(RevitVersion)' == '2025' or '$(RevitVersion)' == '2026' ">
+    <TargetFramework>net8.0-windows</TargetFramework>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(RevitVersion)' == '2027' ">
+    <TargetFramework>net10.0-windows</TargetFramework>
+  </PropertyGroup>
+
+  <!-- Default year per leg when multi-targeting: the oldest release on that
+       runtime, so one DLL serves every later release on the same runtime. -->
+  <PropertyGroup Condition=" '$(RevitVersion)' == '' and '$(TargetFramework)' == 'net48' ">
+    <RevitVersion>2024</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(RevitVersion)' == '' and '$(TargetFramework)' == 'net8.0-windows' ">
+    <RevitVersion>2025</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(RevitVersion)' == '' and '$(TargetFramework)' == 'net10.0-windows' ">
+    <RevitVersion>2027</RevitVersion>
+  </PropertyGroup>
+
+  <!-- Exact Revit API package per year. Bump deliberately; Renovate does not
+       track property-driven versions. -->
+  <PropertyGroup>
+    <RevitApiVersion Condition=" '$(RevitVersion)' == '2024' ">2024.3.60</RevitApiVersion>
+    <RevitApiVersion Condition=" '$(RevitVersion)' == '2025' ">2025.4.60</RevitApiVersion>
+    <RevitApiVersion Condition=" '$(RevitVersion)' == '2026' ">2026.4.10</RevitApiVersion>
+    <RevitApiVersion Condition=" '$(RevitVersion)' == '2027' ">2027.3.0</RevitApiVersion>
+  </PropertyGroup>
+
+  <!-- #if REVIT2025 / REVIT2025_OR_GREATER, same names the Nice3point
+       templates generate, so API-version branches stay portable. -->
+  <PropertyGroup>
+    <DefineConstants>$(DefineConstants);REVIT$(RevitVersion)</DefineConstants>
+    <DefineConstants Condition=" '$(RevitVersion)' != '' and '$(RevitVersion)' >= '2024' ">$(DefineConstants);REVIT2024_OR_GREATER</DefineConstants>
+    <DefineConstants Condition=" '$(RevitVersion)' != '' and '$(RevitVersion)' >= '2025' ">$(DefineConstants);REVIT2025_OR_GREATER</DefineConstants>
+    <DefineConstants Condition=" '$(RevitVersion)' != '' and '$(RevitVersion)' >= '2026' ">$(DefineConstants);REVIT2026_OR_GREATER</DefineConstants>
+    <DefineConstants Condition=" '$(RevitVersion)' != '' and '$(RevitVersion)' >= '2027' ">$(DefineConstants);REVIT2027_OR_GREATER</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Revit 2025+ hosts are WPF desktop apps; the RevitAPIUI surface depends
+       on the WindowsDesktop framework (Autodesk's MSB3277 guidance). -->
+  <PropertyGroup Condition=" '$(TargetFramework)' != 'net48' ">
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <!-- ── References ───────────────────────────────────────────────────── -->
+
+  <!-- An unmapped year still needs a leg to evaluate under, or MSBuild dies
+       before this target can explain what went wrong. -->
+  <PropertyGroup Condition=" '$(RevitVersion)' != '' and '$(RevitApiVersion)' == '' ">
+    <TargetFramework>net48</TargetFramework>
+  </PropertyGroup>
+  <Target Name="ValidateRevitVersion" BeforeTargets="CollectPackageReferences;CoreCompile">
+    <Error Condition=" '$(RevitVersion)' != '' and '$(RevitApiVersion)' == '' "
+           Text="RevitVersion '$(RevitVersion)' has no Revit API package mapping in SpecRAddin.csproj (supported: 2024, 2025, 2026, 2027)." />
+  </Target>
+
+  <!-- Revit API: reference assemblies from NuGet; Revit supplies the real
+       ones at runtime, so nothing is copied to output. -->
   <ItemGroup>
-    <Reference Include="RevitAPI">
-      <HintPath>$(RevitApiDir)\RevitAPI.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="RevitAPIUI">
-      <HintPath>$(RevitApiDir)\RevitAPIUI.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="$(RevitApiVersion)" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="$(RevitApiVersion)" />
   </ItemGroup>
 
-  <!-- Typed REST client + JSON. Pinned versions; bump via the lockfile, never blind. -->
-  <ItemGroup>
+  <!-- Typed REST client + JSON, pinned per leg. NuGet resolves each target
+       framework as an independent graph, so the two Refit lines never meet.
+       net48 stays on the Refit 7.x / System.Text.Json 8.x pair that is known to
+       load in Revit 2024's .NET Framework process: every Refit >= 9 requires
+       STJ >= 10.x there (NU1605 against this pin — see ADR-094). -->
+  <ItemGroup Condition=" '$(TargetFramework)' == 'net48' ">
     <PackageReference Include="Refit" Version="7.2.22" />
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
+  </ItemGroup>
+  <ItemGroup Condition=" '$(TargetFramework)' != 'net48' ">
+    <PackageReference Include="Refit" Version="16.3.0" />
   </ItemGroup>
 
   <!-- Deploy the manifest next to the assembly for local install convenience. -->
