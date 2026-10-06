@@ -49,15 +49,15 @@ single-year build resolves a different package than the committed lock, so point
 it at a throwaway lock path as shown (the committed `packages.lock.json` covers
 the default matrix only).
 
-The build writes one folder per leg under `bin\x64\Release\<tfm>\` —
+The build writes one folder per leg under `bin\Release\<tfm>\` —
 `SpecRAddin.dll`, its NuGet dependencies (`Refit.dll` and friends; the Revit API
 is never copied) and a copy of `SpecRAddin.addin`:
 
-| Folder                             | Revit                                      |
-| ---------------------------------- | ------------------------------------------ |
-| `bin\x64\Release\net48\`           | 2024                                       |
-| `bin\x64\Release\net8.0-windows\`  | 2025 and 2026 (built against the 2025 API) |
-| `bin\x64\Release\net10.0-windows\` | 2027                                       |
+| Folder                         | Revit                                      |
+| ------------------------------ | ------------------------------------------ |
+| `bin\Release\net48\`           | 2024                                       |
+| `bin\Release\net8.0-windows\`  | 2025 and 2026 (built against the 2025 API) |
+| `bin\Release\net10.0-windows\` | 2027                                       |
 
 ## Install (manual load into Revit)
 
@@ -101,13 +101,11 @@ contract change. **NSwag** would generate a complete client from `openapi.yaml`,
 but that is far more code than this scaffold needs, adds a build-time generation
 dependency, and produces output that drifts noisily under review.
 
-Refit is pinned **per target framework**: the `net48` leg keeps Refit 7.2.22 with
-System.Text.Json 8.0.6 (the pair known to load inside Revit 2024's .NET Framework
-process — every Refit ≥ 9 would force System.Text.Json 10.x there), while the .NET
-8 and .NET 10 legs use Refit 16.x. NuGet resolves each leg independently, so the
-two never collide, and `NU1605` is an explicit error so an unconditional bump
-fails at restore instead of silently dragging a newer System.Text.Json onto the
-.NET Framework leg.
+Refit 16.x is used on every leg. System.Text.Json 10.x is referenced directly on
+the `net48` leg only (Refit requires it there; the 8.x line leaves support with
+.NET 8 on 2026-11-10), while the .NET 8 and .NET 10 legs use the framework's own
+copy. NuGet resolves each leg independently, and `NU1605` is an explicit error so
+a transitive floor can never silently outrun a direct pin.
 
 ### One target framework per Revit runtime (ADR-094)
 
