@@ -7,7 +7,12 @@
 // Pins that the two registered descriptions now diverge correctly: the
 // baseline/project tool advertises only "toc", and the package tool
 // advertises the full set the validator actually permits for package scope.
+//
+// The module under test is imported statically: vi.mock is hoisted above
+// static imports, and loading the AST + MCP module graph cold can take longer
+// than the 5 s per-test timeout, which is not what these cases measure.
 import { describe, it, expect, vi } from 'vitest';
+import { registerRequiredSectionsTools } from './required-sections-tools.js';
 
 vi.mock('../db/index.js', () => ({
   listRequiredSections: vi.fn(),
@@ -49,8 +54,7 @@ function fakeRegistrar(): {
 }
 
 describe('required-sections tool descriptions — seed advertisement matches the validator (#569)', () => {
-  it('set_required_sections (baseline/project scope) advertises only "toc", never "baseline" or packageId', async () => {
-    const { registerRequiredSectionsTools } = await import('./required-sections-tools.js');
+  it('set_required_sections (baseline/project scope) advertises only "toc", never "baseline" or packageId', () => {
     const { registrar, captured } = fakeRegistrar();
 
     registerRequiredSectionsTools(registrar);
@@ -62,8 +66,7 @@ describe('required-sections tool descriptions — seed advertisement matches the
     expect(tool?.description).not.toContain('packageId');
   });
 
-  it('set_package_required_sections advertises the full seed set the validator permits for package scope', async () => {
-    const { registerRequiredSectionsTools } = await import('./required-sections-tools.js');
+  it('set_package_required_sections advertises the full seed set the validator permits for package scope', () => {
     const { registrar, captured } = fakeRegistrar();
 
     registerRequiredSectionsTools(registrar);
