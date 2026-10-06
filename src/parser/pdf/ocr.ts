@@ -69,10 +69,13 @@ function ensurePdfJsModule(): Promise<void> {
 }
 
 function pdfData(buffer: Buffer): Uint8Array {
-  // Buffer already is a Uint8Array; return it directly rather than copying the
-  // whole file on this hot fallback path. The caller (parsePdf) does not reuse
-  // the buffer after OCR, so letting pdf.js consume it in place is safe.
-  return buffer;
+  // PDF.js refuses Node Buffers outright ("Please provide binary data as
+  // Uint8Array, rather than Buffer") and transfers the ArrayBuffer it is given
+  // to its worker, which would detach the caller's memory. Copy into a plain
+  // Uint8Array with its own backing store so the render boundary gets data it
+  // accepts and the caller keeps ownership of its Buffer (#683). The copy is
+  // one file-sized memcpy on an already OCR-bound fallback path.
+  return new Uint8Array(buffer);
 }
 
 function tesseractOptions(options: PdfOcrOptions): TesseractWorkerOptions {
