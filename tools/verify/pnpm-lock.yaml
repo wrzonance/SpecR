@@ -27,7 +27,7 @@ importers:
         specifier: ^3.10.0
         version: 3.10.2
       multer:
-        specifier: ^2.4.0
+        specifier: ^2.1.1
         version: 2.4.0
       pixelmatch:
         specifier: ^7.2.0
