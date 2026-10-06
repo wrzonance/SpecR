@@ -25,15 +25,7 @@ namespace SpecRAddin
                 var commandClass = typeof(HealthCheckCommand).FullName
                     ?? throw new InvalidOperationException("HealthCheckCommand type name unavailable");
 
-                // From Revit 2025 the ribbon data classes are disposable API wrappers;
-                // the panel copies what it needs in AddItem, so the data object is
-                // released at the end of this scope (CodeQL cs/local-not-disposed).
-                // Revit 2024's PushButtonData does not implement IDisposable.
-#if REVIT2025_OR_GREATER
-                using var buttonData = new PushButtonData(
-#else
                 var buttonData = new PushButtonData(
-#endif
                     name: "SpecRHealthCheck",
                     text: "Health\nCheck",
                     assemblyName: assemblyPath,
@@ -44,9 +36,19 @@ namespace SpecRAddin
                         $"Calls SpecR at the URL in the {SpecRClient.BaseUrlEnvVar} environment " +
                         $"variable (default {SpecRClient.DefaultBaseUrl}).",
                 };
-
-                panel.AddItem(buttonData);
-                return Result.Succeeded;
+                try
+                {
+                    panel.AddItem(buttonData);
+                    return Result.Succeeded;
+                }
+                finally
+                {
+                    // From Revit 2025 the ribbon data classes are disposable API
+                    // wrappers (Revit 2024's are not); the panel has copied what it
+                    // needs in AddItem, so release the data object either way without
+                    // a per-version #if (CodeQL cs/local-not-disposed).
+                    (buttonData as IDisposable)?.Dispose();
+                }
             }
             catch (Exception ex) when (ex is Autodesk.Revit.Exceptions.ApplicationException
                                        || ex is InvalidOperationException)
