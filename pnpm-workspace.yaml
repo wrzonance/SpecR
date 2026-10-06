@@ -73,13 +73,31 @@ overrides:
   # GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf, GHSA-7p8r-x3mc-p8w7,
   # GHSA-v2hh-gcrm-f6hx, GHSA-4c8g-83qw-93j6 (host confusion / SSRF in URI
   # normalization; ajv only uses it to resolve schema $ref ids).
-  fast-uri@<3.1.6: '>=3.1.6 <4'
-  # runtime, via docx's 5.x consumer only — postcss's nanoid@3 line is not
+  # 2026-10 sweep adds GHSA-hrr3-gc8f-f4qj (percent-encoded host case normalization).
+  fast-uri@<3.1.8: '>=3.1.8 <4'
+  # runtime, via docx's 5.x consumer (docx 9.8+ resolves nanoid 6, which is
+  # outside the affected range) — postcss's nanoid@3 line is not
   # affected and MUST stay on 3.x (nanoid 5 is ESM-only). GHSA-28wg-ghj8-5hjv.
   'nanoid@>=5.0.0 <5.1.16': '>=5.1.16 <6'
   # dev, via vite / depcheck. GHSA-fxqj-rqcc-2cmp, GHSA-r28c-9q8g-f849
   # (sourceMappingURL .map disclosure; never invoked on untrusted CSS here).
   postcss@<8.5.23: '>=8.5.23 <9'
-  # dev, via minimatch@7 (eslint tooling). GHSA-3jxr-9vmj-r5cp (exponential
-  # expansion DoS); the 1.x line under minimatch@3 is not in the affected range.
-  'brace-expansion@>=2.0.0 <2.1.2': '>=2.1.2 <3'
+  # dev, via minimatch@3 (eslint), minimatch@7 (depcheck) and minimatch@10
+  # (eslint-plugin-sonarjs / glob). GHSA-3jxr-9vmj-r5cp (exponential expansion)
+  # plus the 2026-09-29 trio GHSA-q2hr-2g5m-vwhr (quadratic `{a},b}` rewrite),
+  # GHSA-qhr7-859c-m2p7 and GHSA-6j4f-fj2g-mc7p (uncontrolled recursion) — the
+  # q2hr floors are the highest of the three per line, so they cover all.
+  'brace-expansion@>=1.0.0 <1.1.21': '>=1.1.21 <2'
+  'brace-expansion@>=2.0.0 <2.1.7': '>=2.1.7 <3'
+  'brace-expansion@>=5.0.0 <5.0.12': '>=5.0.12 <6'
+  # runtime, via express. GHSA-jqcg-44mw-7w3h (CVE-2026-90711, critical): an
+  # IPv4-mapped IPv6 client address matched a trusted-proxy subnet it should
+  # not have, letting X-Forwarded-For spoof the trusted client IP. express 5.2.1
+  # still declares ^2.0.7, so the floor is what moves the lock.
+  proxy-addr@<2.0.8: '>=2.0.8 <3'
+  # dev, via depcheck → @vue/compiler-sfc and vite → postcss. GHSA-68fv-2mgg-jv7q
+  # (event-loop DoS through indexed source-map section offsets).
+  source-map-js@<1.2.2: '>=1.2.2 <2'
+  # dev, via pino-pretty (the dev-only log transport). GHSA-jggr-w7fw-pc2j
+  # (stack exhaustion copying deeply nested values).
+  fast-copy@<4.1.0: '>=4.1.0 <5'
