@@ -36,19 +36,14 @@ namespace SpecRAddin
                         $"Calls SpecR at the URL in the {SpecRClient.BaseUrlEnvVar} environment " +
                         $"variable (default {SpecRClient.DefaultBaseUrl}).",
                 };
-                try
-                {
-                    panel.AddItem(buttonData);
-                    return Result.Succeeded;
-                }
-                finally
-                {
-                    // From Revit 2025 the ribbon data classes are disposable API
-                    // wrappers (Revit 2024's are not); the panel has copied what it
-                    // needs in AddItem, so release the data object either way without
-                    // a per-version #if (CodeQL cs/local-not-disposed).
-                    (buttonData as IDisposable)?.Dispose();
-                }
+                // From Revit 2025 the ribbon data classes are disposable API wrappers
+                // (Revit 2024's are not): release the data object at the end of this
+                // scope on the legs where it is one, with a single code path for all
+                // of them. The panel copies what it needs in AddItem.
+                using var releaseButtonData = buttonData as IDisposable;
+
+                panel.AddItem(buttonData);
+                return Result.Succeeded;
             }
             catch (Exception ex) when (ex is Autodesk.Revit.Exceptions.ApplicationException
                                        || ex is InvalidOperationException)
