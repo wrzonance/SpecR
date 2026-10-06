@@ -134,3 +134,32 @@ describe('hasLocalTraineddata (tesseract.js cache filename contract)', () => {
     }
   });
 });
+
+describe('recognizePdfPages hands PDF.js owned binary data (#683)', () => {
+  it('ocr: renderer receives a plain Uint8Array copy, never the caller Buffer', async () => {
+    const source = Buffer.from('%PDF-1.4 original bytes');
+    const seen: Uint8Array[] = [];
+
+    await recognizePdfPages(source, [1, 2], {
+      createWorker: WORKING_WORKER,
+      renderPageAsImage: (data) => {
+        seen.push(data);
+        return Promise.resolve(Buffer.alloc(0));
+      },
+    });
+
+    expect(seen).toHaveLength(2);
+    for (const data of seen) {
+      // PDF.js rejects Buffer instances outright ("Please provide binary data
+      // as Uint8Array, rather than Buffer"), so the boundary must hand over a
+      // plain Uint8Array ...
+      expect(Buffer.isBuffer(data)).toBe(false);
+      expect(data).toBeInstanceOf(Uint8Array);
+      expect(Buffer.from(data).equals(source)).toBe(true);
+      // ... whose backing store the caller does not share: PDF.js transfers
+      // the ArrayBuffer to its worker, which would detach the caller's Buffer.
+      expect(data.buffer).not.toBe(source.buffer);
+    }
+    expect(source.toString()).toBe('%PDF-1.4 original bytes');
+  });
+});
