@@ -13,6 +13,19 @@
 # advisory.
 engineStrict: true
 
+# `pnpm audit` advisories with NO patched release upstream, carried here so
+# the audit stays clean and the justification lives next to the setting.
+# Remove an entry as soon as the ecosystem ships a fix — then let the bounded
+# overrides below take over, as for every other floor in this file.
+auditConfig:
+  ignoreGhsas:
+    # braces <=3.0.3 (GHSA-vfj7-8cjw-p6xm, CVE-2026-93687): stack exhaustion on
+    # deeply nested brace patterns. Dev-only, reached solely through
+    # depcheck → findup-sync → micromatch → braces, where the only patterns it
+    # ever expands are depcheck's own built-in globs — never user or network
+    # input. npm has no 3.0.4; micromatch@4 still declares ^3.0.3 (2026-10-06).
+    - GHSA-vfj7-8cjw-p6xm
+
 # pnpm 11 — allow esbuild postinstall binary build (required by vitest/tsx).
 # core-js/protobufjs (transitive deps of @redocly/cli) have install scripts we
 # explicitly DENY — they are not needed for `redocly lint` and false silences
