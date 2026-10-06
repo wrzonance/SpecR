@@ -167,6 +167,33 @@ jobs:
         working-directory: tools/verify
         run: pnpm test --reporter=verbose
 
+  # ─── Revit add-in ───────────────────────────────────────────────────
+  # Compiles revit-addin/ for every Revit runtime leg (net48 / net8.0-windows /
+  # net10.0-windows, ADR-094). The Revit API comes from NuGet reference
+  # packages, so no Revit install is needed; EnableWindowsTargeting in the
+  # csproj lets the -windows legs build on Linux. Locked-mode restore makes
+  # packages.lock.json the record of the dependency graph.
+  revit-addin:
+    name: Build (revit-addin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: revit-addin/global.json
+
+      - name: Restore (locked)
+        working-directory: revit-addin
+        run: dotnet restore SpecRAddin.csproj --locked-mode
+
+      - name: Build all Revit runtime legs
+        working-directory: revit-addin
+        run: dotnet build SpecRAddin.csproj -c Release --no-restore -warnaserror
+
   # ─── Build ──────────────────────────────────────────────────────────
   build:
     name: Build (tsc)

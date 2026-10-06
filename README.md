@@ -37,7 +37,7 @@ Analytical outputs: coordination report, submittal register, spec diff, and refe
 - Onboarding pipeline: async library-master import, per-paragraph editability classification with human overrides, reclassify, finalize/reopen, comment closure + open-comments reporting, and structural numbering profiles.
 - Style-template CRUD, DOCX template import, convention profile CRUD, and spec/project soft-delete (withdraw) with restore.
 - MCP Streamable HTTP server (`POST /mcp`) with read-oriented tools/resources — stateless per request by default; an `initialize` call can mint a stateful session (server-issued `mcp-session-id`) that later requests reuse and `DELETE /mcp` terminates.
-- Revit 2024 add-in scaffold with a typed REST client and health-check ribbon command.
+- Revit add-in scaffold (one build per Revit runtime: 2024 / 2025–2026 / 2027) with a typed REST client and health-check ribbon command.
 
 See [ROADMAP.md](ROADMAP.md) for the fuller capability inventory and planned work.
 
