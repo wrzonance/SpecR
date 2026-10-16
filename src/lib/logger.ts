@@ -61,8 +61,25 @@ export const logger: pino.Logger = transport
 // buffer flushes, dropping the final JSONL lines — including parse warnings — that
 // the corpus/fix-loop reads back after a run. Drain it explicitly before exit.
 // No-op (resolves immediately) when logging to stdout, where there is no worker.
+let closing: Promise<void> | undefined;
+
 export async function closeLogger(): Promise<void> {
   if (!transport) return;
+  if (closing) return closing;
+  // A previously handled worker failure may have closed it before shutdown.
+  if ('closed' in transport && transport.closed === true) return;
+  const activeTransport = transport;
+  const keepReferenced = (): void => process.ref(activeTransport);
+  // Pino unrefs its worker on ready, which can arrive after shutdown starts.
+  // Keep it alive until close, including that late-ready transition.
+  activeTransport.on('ready', keepReferenced);
+  keepReferenced();
+  closing = once(activeTransport, 'close')
+    .then(() => undefined)
+    .finally(() => {
+      activeTransport.off('ready', keepReferenced);
+      process.unref(activeTransport);
+    });
   transport.end();
-  await once(transport, 'close');
+  return closing;
 }
