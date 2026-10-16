@@ -81,6 +81,29 @@ const cases: VariantCase[] = [
 ];
 
 describe('OpenAPI: clients can select every report variant by discriminator (#719)', () => {
+  it('maps every declared discriminator value to exactly its oneOf branch', async () => {
+    const doc = await loadSpec();
+    const schemas = doc.components?.schemas ?? {};
+    const tagged = z.object({ discriminator: z.object({ propertyName: z.string() }) });
+    const branches = z.object({ properties: z.record(z.string(), z.unknown()) });
+    const unions = Object.entries(schemas).filter(([, value]) => tagged.safeParse(value).success);
+    expect(unions.length).toBeGreaterThan(0);
+    for (const [name, value] of unions) {
+      const union = UnionSchema.parse(value);
+      const entries = union.oneOf.flatMap(({ $ref }) => {
+        const component = $ref.replace('#/components/schemas/', '');
+        const branch = branches.parse(schemas[component]);
+        const tags = z
+          .object({ enum: z.array(z.string()).nonempty() })
+          .parse(branch.properties[union.discriminator.propertyName]);
+        return tags.enum.map((tag): [string, string] => [tag, $ref]);
+      });
+      const expected = Object.fromEntries(entries);
+      expect(Object.keys(expected), name).toHaveLength(entries.length);
+      expect(union.discriminator.mapping, name).toEqual(expected);
+    }
+  });
+
   it.each(cases)(
     '$schema selects and validates $payload',
     async ({ schema, payload, required }) => {
@@ -91,6 +114,7 @@ describe('OpenAPI: clients can select every report variant by discriminator (#71
       expect(union.oneOf).toContainEqual({ $ref: ref });
 
       const selected = getValidator({ $ref: ref });
+      // AJV validates plain oneOf/enum; client selection is checked separately above.
       const wholeUnion = getValidator({ $ref: `#/components/schemas/${schema}` });
       expect(selected(payload)).toBe(true);
       expect(wholeUnion(payload)).toBe(true);

@@ -7479,6 +7479,7 @@ components:
       properties:
         kind: { type: string, enum: [project] }
         projectId: { type: string, format: uuid }
+
     OpenComment:
       type: object
       required: [specId, specSection, paragraphId, author, text, anchor]
@@ -7532,6 +7533,7 @@ components:
       properties:
         kind: { type: string, enum: [project] }
         projectId: { type: string, format: uuid }
+
     TextBoxReportItem:
       type: object
       required: [specId, specSection, paragraphId, floating, generation, interiorText]
