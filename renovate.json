@@ -5,7 +5,23 @@
   "automerge": false,
   "labels": ["dependencies"],
   "commitMessagePrefix": "chore(deps):",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github\\/workflows\\/(?:ci|release)\\.yml$/"],
+      "matchStrings": ["PNPM_VERSION:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""],
+      "depNameTemplate": "pnpm",
+      "datasourceTemplate": "npm",
+      "versioningTemplate": "semver"
+    }
+  ],
   "packageRules": [
+    {
+      "description": "Keep the existing pnpm 11 toolchain decision from #668. A major upgrade must coordinate all workflows and both isolated workspaces; 11.x maintenance updates remain enabled.",
+      "matchPackageNames": ["pnpm"],
+      "allowedVersions": "<12.0.0",
+      "groupName": "github-actions"
+    },
     {
       "matchManagers": ["npm"],
       "groupName": "npm-deps"

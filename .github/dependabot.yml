@@ -39,9 +39,8 @@ updates:
   # --- workflow action pins ---
   # Where an action is SHA-pinned (security.md), Dependabot updates the pin and
   # the trailing version comment together. ci.yml, release.yml and codeql.yml are
-  # fully SHA-pinned; claude.yml still uses floating `@v7`/`@v1` tags — tracked
-  # in #600. Dependabot bumps a floating tag but cannot make it immutable, so it
-  # is not a substitute for the pin.
+  # fully SHA-pinned, including claude.yml (fixed in #600). The local/CI
+  # check:action-pins gate prevents a return to floating tags.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
