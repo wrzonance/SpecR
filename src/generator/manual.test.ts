@@ -149,12 +149,12 @@ describe('generateManual', () => {
 
   it('manual TOC remains a dirty field for Word, without precomputed entries (#718)', async () => {
     const xml = await getDocXml(await generateManual([SECTION_A, SECTION_B], META));
-    const toc = xml.match(/<w:sdt\b[^>]*>.*?<\/w:sdt>/gs)?.find((sdt) => sdt.includes('TOC '));
-    expect(toc).toBeDefined();
-    expect(toc).toContain('w:dirty="true"');
-    expect(toc).toContain('TOC ');
-    expect(toc).not.toContain('SECTION 03 30 00');
-    expect(toc).not.toContain('PAGEREF');
+    // Assert the complete field, including the empty result paragraph between
+    // separate/end. Matching a whole sdt with a lazy regex truncates nested controls.
+    expect(xml).toMatch(
+      /<w:fldChar w:fldCharType="begin" w:dirty="true"\/><w:instrText[^>]*>TOC [^<]*<\/w:instrText><w:fldChar w:fldCharType="separate"\/><\/w:r><\/w:p><w:p\/><w:p><w:r><w:fldChar w:fldCharType="end"\/>/
+    );
+    expect(xml).not.toContain('PAGEREF');
   });
 
   it('throws GeneratorError when no sections are supplied', async () => {

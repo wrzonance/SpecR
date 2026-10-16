@@ -215,6 +215,8 @@ describe('renderImageRun — EMU to pixel transformation is pure, deterministic,
     [100000, 200000, 95250, 200025], // rounds to 10px x 21px, does not round-trip exactly
     // Largest whole-pixel extent Word can open (225457px).
     [2147477925, 2147477925, 2147477925, 2147477925],
+    // Largest accepted input: still rounds down to that same whole-pixel extent.
+    [2147482687, 2147482687, 2147477925, 2147477925],
   ];
 
   it.each(emuCases)(
@@ -222,6 +224,9 @@ describe('renderImageRun — EMU to pixel transformation is pure, deterministic,
     async (widthEmu, heightEmu, expectedCx, expectedCy) => {
       const run = renderImageRun({ ...VALID_IMAGE_FIELD, widthEmu, heightEmu });
       expect(run).toBeDefined();
+      expect(
+        imageFieldWarnings({ ...VALID_IMAGE_FIELD, widthEmu, heightEmu }, 'header.left')
+      ).toEqual([]);
       const zip = await renderToZip(run!);
       const xml = await zip.file('word/document.xml')!.async('string');
       expect(xml).toMatch(new RegExp(`cx="${expectedCx}"`));

@@ -88,8 +88,9 @@ function decodeAndSniff(
  * Pure, total, NEVER THROWS — no try/catch, no logger. `docx`'s `ImageRun`
  * constructor performs no content validation on the image buffer, but checks
  * drawing extents since 9.9 (ADR-069); every reachable failure mode is already
- * excluded by this function's own guard-clause returns before `ImageRun` is
- * ever constructed. The `type` option is always the **sniffed** media type,
+ * excluded by the positive-integer dimension schema and this function's
+ * guard-clause returns before `ImageRun` is constructed. The `type` option is
+ * always the **sniffed** media type,
  * never `field.imageMediaType` — a stale/mismatched declared type cannot make
  * this emit a `type` that disagrees with the actual bytes.
  */
