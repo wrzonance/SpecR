@@ -7458,18 +7458,27 @@ components:
 
     OpenCommentsScope:
       oneOf:
-        - type: object
-          required: [kind, specId]
-          properties:
-            kind: { type: string, enum: [spec] }
-            specId: { type: string, format: uuid }
-        - type: object
-          required: [kind, projectId]
-          properties:
-            kind: { type: string, enum: [project] }
-            projectId: { type: string, format: uuid }
+        - $ref: '#/components/schemas/OpenCommentsSpecScope'
+        - $ref: '#/components/schemas/OpenCommentsProjectScope'
       discriminator:
         propertyName: kind
+        mapping:
+          spec: '#/components/schemas/OpenCommentsSpecScope'
+          project: '#/components/schemas/OpenCommentsProjectScope'
+
+    OpenCommentsSpecScope:
+      type: object
+      required: [kind, specId]
+      properties:
+        kind: { type: string, enum: [spec] }
+        specId: { type: string, format: uuid }
+
+    OpenCommentsProjectScope:
+      type: object
+      required: [kind, projectId]
+      properties:
+        kind: { type: string, enum: [project] }
+        projectId: { type: string, format: uuid }
     OpenComment:
       type: object
       required: [specId, specSection, paragraphId, author, text, anchor]
@@ -7502,18 +7511,27 @@ components:
 
     TextBoxReportScope:
       oneOf:
-        - type: object
-          required: [kind, specId]
-          properties:
-            kind: { type: string, enum: [spec] }
-            specId: { type: string, format: uuid }
-        - type: object
-          required: [kind, projectId]
-          properties:
-            kind: { type: string, enum: [project] }
-            projectId: { type: string, format: uuid }
+        - $ref: '#/components/schemas/TextBoxReportSpecScope'
+        - $ref: '#/components/schemas/TextBoxReportProjectScope'
       discriminator:
         propertyName: kind
+        mapping:
+          spec: '#/components/schemas/TextBoxReportSpecScope'
+          project: '#/components/schemas/TextBoxReportProjectScope'
+
+    TextBoxReportSpecScope:
+      type: object
+      required: [kind, specId]
+      properties:
+        kind: { type: string, enum: [spec] }
+        specId: { type: string, format: uuid }
+
+    TextBoxReportProjectScope:
+      type: object
+      required: [kind, projectId]
+      properties:
+        kind: { type: string, enum: [project] }
+        projectId: { type: string, format: uuid }
     TextBoxReportItem:
       type: object
       required: [specId, specSection, paragraphId, floating, generation, interiorText]
@@ -7564,47 +7582,64 @@ components:
         the firm as Final. Every variant carries nodeId/text plus
         kind-specific detail.
       oneOf:
-        - type: object
-          required: [type, nodeId, text, kind, options]
-          properties:
-            type: { type: string, enum: [unresolved_choice_token] }
-            nodeId: { type: string, format: uuid }
-            text: { type: string }
-            kind:
-              type: string
-              enum: [angle, bracket]
-              description: The choice-token delimiter style — `<__>` vs `[__]`.
-            options:
-              type: array
-              items: { type: string }
-              description: The pick-one/fill-in choices captured at parse time.
-        - type: object
-          required: [type, nodeId, text]
-          properties:
-            type: { type: string, enum: [specifier_note_present] }
-            nodeId: { type: string, format: uuid }
-            text: { type: string }
-        - type: object
-          required: [type, nodeId, text, author]
-          properties:
-            type: { type: string, enum: [open_comment] }
-            nodeId: { type: string, format: uuid }
-            text: { type: string }
-            author: { type: string }
-        - type: object
-          required: [type, nodeId, text, objectKind]
-          properties:
-            type: { type: string, enum: [body_object_present] }
-            nodeId: { type: string, format: uuid }
-            text: { type: string }
-            objectKind:
-              type: string
-              enum: [textBox]
-              description: >-
-                Always textBox — a body-level table is structural content
-                (ADR-072) and never fires this finding.
+        - $ref: '#/components/schemas/UnresolvedChoiceTokenFinding'
+        - $ref: '#/components/schemas/SpecifierNotePresentFinding'
+        - $ref: '#/components/schemas/OpenCommentFinding'
+        - $ref: '#/components/schemas/BodyObjectPresentFinding'
       discriminator:
         propertyName: type
+        mapping:
+          unresolved_choice_token: '#/components/schemas/UnresolvedChoiceTokenFinding'
+          specifier_note_present: '#/components/schemas/SpecifierNotePresentFinding'
+          open_comment: '#/components/schemas/OpenCommentFinding'
+          body_object_present: '#/components/schemas/BodyObjectPresentFinding'
+
+    UnresolvedChoiceTokenFinding:
+      type: object
+      required: [type, nodeId, text, kind, options]
+      properties:
+        type: { type: string, enum: [unresolved_choice_token] }
+        nodeId: { type: string, format: uuid }
+        text: { type: string }
+        kind:
+          type: string
+          enum: [angle, bracket]
+          description: The choice-token delimiter style — `<__>` vs `[__]`.
+        options:
+          type: array
+          items: { type: string }
+          description: The pick-one/fill-in choices captured at parse time.
+
+    SpecifierNotePresentFinding:
+      type: object
+      required: [type, nodeId, text]
+      properties:
+        type: { type: string, enum: [specifier_note_present] }
+        nodeId: { type: string, format: uuid }
+        text: { type: string }
+
+    OpenCommentFinding:
+      type: object
+      required: [type, nodeId, text, author]
+      properties:
+        type: { type: string, enum: [open_comment] }
+        nodeId: { type: string, format: uuid }
+        text: { type: string }
+        author: { type: string }
+
+    BodyObjectPresentFinding:
+      type: object
+      required: [type, nodeId, text, objectKind]
+      properties:
+        type: { type: string, enum: [body_object_present] }
+        nodeId: { type: string, format: uuid }
+        text: { type: string }
+        objectKind:
+          type: string
+          enum: [textBox]
+          description: >-
+            Always textBox — a body-level table is structural content
+            (ADR-072) and never fires this finding.
 
     StampedReadinessFinding:
       description: A ReadinessFinding stamped with the spec that produced it (package scope).
@@ -7639,18 +7674,27 @@ components:
 
     ReadinessScope:
       oneOf:
-        - type: object
-          required: [kind, specId]
-          properties:
-            kind: { type: string, enum: [spec] }
-            specId: { type: string, format: uuid }
-        - type: object
-          required: [kind, packageId]
-          properties:
-            kind: { type: string, enum: [package] }
-            packageId: { type: string, format: uuid }
+        - $ref: '#/components/schemas/ReadinessSpecScope'
+        - $ref: '#/components/schemas/ReadinessPackageScope'
       discriminator:
         propertyName: kind
+        mapping:
+          spec: '#/components/schemas/ReadinessSpecScope'
+          package: '#/components/schemas/ReadinessPackageScope'
+
+    ReadinessSpecScope:
+      type: object
+      required: [kind, specId]
+      properties:
+        kind: { type: string, enum: [spec] }
+        specId: { type: string, format: uuid }
+
+    ReadinessPackageScope:
+      type: object
+      required: [kind, packageId]
+      properties:
+        kind: { type: string, enum: [package] }
+        packageId: { type: string, format: uuid }
 
     ReadinessReport:
       type: object
@@ -11220,28 +11264,45 @@ components:
         of a client library, a project, a design package, or an issued
         revision.
       oneOf:
-        - type: object
-          required: [kind, clientLibraryId]
-          properties:
-            kind: { type: string, enum: [client] }
-            clientLibraryId: { type: string, format: uuid }
-        - type: object
-          required: [kind, projectId]
-          properties:
-            kind: { type: string, enum: [project] }
-            projectId: { type: string, format: uuid }
-        - type: object
-          required: [kind, packageId]
-          properties:
-            kind: { type: string, enum: [package] }
-            packageId: { type: string, format: uuid }
-        - type: object
-          required: [kind, revisionId]
-          properties:
-            kind: { type: string, enum: [revision] }
-            revisionId: { type: string, format: uuid }
+        - $ref: '#/components/schemas/HeaderFooterClientScope'
+        - $ref: '#/components/schemas/HeaderFooterProjectScope'
+        - $ref: '#/components/schemas/HeaderFooterPackageScope'
+        - $ref: '#/components/schemas/HeaderFooterRevisionScope'
       discriminator:
         propertyName: kind
+        mapping:
+          client: '#/components/schemas/HeaderFooterClientScope'
+          project: '#/components/schemas/HeaderFooterProjectScope'
+          package: '#/components/schemas/HeaderFooterPackageScope'
+          revision: '#/components/schemas/HeaderFooterRevisionScope'
+
+    HeaderFooterClientScope:
+      type: object
+      required: [kind, clientLibraryId]
+      properties:
+        kind: { type: string, enum: [client] }
+        clientLibraryId: { type: string, format: uuid }
+
+    HeaderFooterProjectScope:
+      type: object
+      required: [kind, projectId]
+      properties:
+        kind: { type: string, enum: [project] }
+        projectId: { type: string, format: uuid }
+
+    HeaderFooterPackageScope:
+      type: object
+      required: [kind, packageId]
+      properties:
+        kind: { type: string, enum: [package] }
+        packageId: { type: string, format: uuid }
+
+    HeaderFooterRevisionScope:
+      type: object
+      required: [kind, revisionId]
+      properties:
+        kind: { type: string, enum: [revision] }
+        revisionId: { type: string, format: uuid }
 
     HeaderFooterComposition:
       type: object
