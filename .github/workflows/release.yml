@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  PNPM_VERSION: "11.28.2"
+  PNPM_VERSION: "11.28.5"
 
 jobs:
   create-release:
@@ -50,6 +50,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ".nvmrc"
+          package-manager-cache: false
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -76,6 +77,9 @@ jobs:
 
       - name: Run database migrations (smoke test)
         run: pnpm migrate
+
+      - name: Seed CSI section reference data
+        run: pnpm seed
 
       - name: Run full test suite
         run: pnpm test && pnpm test:integration

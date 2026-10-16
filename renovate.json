@@ -7,6 +7,11 @@
   "commitMessagePrefix": "chore(deps):",
   "packageRules": [
     {
+      "description": "Keep the existing pnpm 11 toolchain decision from #668. A major upgrade must coordinate all workflows and both isolated workspaces; 11.x maintenance updates remain enabled.",
+      "matchPackageNames": ["pnpm"],
+      "allowedVersions": "<12.0.0"
+    },
+    {
       "matchManagers": ["npm"],
       "groupName": "npm-deps"
     },
