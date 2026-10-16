@@ -19,7 +19,7 @@ importers:
     dependencies:
       docx:
         specifier: ^9.6.1
-        version: 9.12.0
+        version: 9.11.0
       docx-preview:
         specifier: ^0.4.0
         version: 0.4.1
@@ -43,8 +43,8 @@ importers:
         version: 4.6.7
     devDependencies:
       '@eslint/js':
-        specifier: latest
-        version: 10.0.1(eslint@9.39.5(supports-color@7.2.0))
+        specifier: ^9.39.5
+        version: 9.39.5
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -280,15 +280,6 @@ packages:
   '@eslint/eslintrc@3.3.6':
     resolution: {integrity: sha512-l2Ul9PrHsPCKcEY/ac7VgFj9D80C7S68sOKc618SyHDPK36s1XcFebXY0iTzUVn4Yq+YbwvSnDmCz9yxjX+QrA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
-
-  '@eslint/js@10.0.1':
-    resolution: {integrity: sha512-zeR9k5pd4gxjZ0abRoIaxdc7I3nDktoXZk2qOv9gCNWx3mVwEn32VRhyLaRsDiJjTs0xq/T8mfPtyuXu7GWBcA==}
-    engines: {node: ^20.19.0 || ^22.13.0 || >=24}
-    peerDependencies:
-      eslint: ^10.0.0
-    peerDependenciesMeta:
-      eslint:
-        optional: true
 
   '@eslint/js@9.39.5':
     resolution: {integrity: sha512-QywQuszQh77pIXCsq998c8hbhSTI/azTty1Z6N53dmAudKHhy573j3yvRLsX2BSp8YpLtoCEG8E9DJe+8zUh4A==}
@@ -706,8 +697,8 @@ packages:
   docx-preview@0.4.1:
     resolution: {integrity: sha512-Dv4g+LeE0swHpPvNC0lAT0YsR5Zq5pAxw7d3vHQ8EChBLgIrqqe9VPL5nVt2HBJap8bEZbXUI0TJob7kBeNU9w==}
 
-  docx@9.12.0:
-    resolution: {integrity: sha512-pRxdJP7cJpqhSxzfhlB01RToOFMAY7+QJ59zT2LowpXjS2q5fAnrvAuQIyGgkuBxTcXii0LFqM96GFjhQcTicQ==}
+  docx@9.11.0:
+    resolution: {integrity: sha512-vQLEYi45vlN/auiMHgx4oC95wbP5qPaD7Vanfixcd3wtTl5gLUPWqUpwbw6yVN0/U6o3p3EX4P5puAeYPXvcSQ==}
     engines: {node: '>=10'}
 
   dunder-proto@1.0.1:
@@ -1686,10 +1677,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@eslint/js@10.0.1(eslint@9.39.5(supports-color@7.2.0))':
-    optionalDependencies:
-      eslint: 9.39.5(supports-color@7.2.0)
-
   '@eslint/js@9.39.5': {}
 
   '@eslint/object-schema@2.1.7': {}
@@ -2079,7 +2066,7 @@ snapshots:
     dependencies:
       jszip: 3.10.2
 
-  docx@9.12.0:
+  docx@9.11.0:
     dependencies:
       '@types/node': 26.6.4
       hash.js: 1.1.7

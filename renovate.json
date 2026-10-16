@@ -67,7 +67,7 @@
     },
     {
       "description": "Toolchain pin: stay on ESLint 9.x. ESLint 10 (2026-02-06) postdates the same model cutoffs, and the flat config here is agent-edited often enough that the cost is real. Declined in #573/#559 \u2014 bounded so it stops recurring. Lift deliberately, moving root and tools/verify together.",
-      "matchPackageNames": ["eslint"],
+      "matchPackageNames": ["eslint", "@eslint/js"],
       "allowedVersions": "<10.0.0"
     },
     {
