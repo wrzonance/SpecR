@@ -82,6 +82,17 @@ corrected and not fatal.
 
 ### `renderImageRun` is pure and total — no try/catch, by verified fact, not by design assumption
 
+**2026-10-16 update (#718):** `docx` 9.9 validates drawing extents against
+Word's 2,147,483,647 EMU limit. The renderer now checks the final rounded
+pixel-to-EMU extent before constructing `ImageRun`; an unsupported width
+or height skips the image and emits a location-qualified warning. It does
+not resize the image or alter its stored dimensions. The previous
+MAX_SAFE_INTEGER rendering test described a drawing Word could not open;
+regressions now cover omission/warnings for that value and for dimensions
+that cross the limit only after rounding, plus the largest supported
+whole-pixel extent. The original constructor investigation below describes
+9.7.1; extent validation is now another guard required for totality.
+
 The original task design specified `renderImageRun` wrapping the
 `ImageRun` construction in a try/catch, logging a warning via the pino
 logger on failure, matching the "never throws" contract this module's

@@ -17,6 +17,8 @@ import type { HeaderFooterField } from './header-footer-fields.js';
 // standard EMU-per-pixel constant (914400 EMU/inch ÷ 96 DPI), not a
 // SpecR-invented figure.
 const EMU_PER_PIXEL = 9525;
+// [MS-OI29500] 20.1.10.42: Word's drawing extent limit, enforced by docx 9.9.
+const MAX_DRAWING_EMU = 2147483647;
 
 /** docx's `ImageRun` `type` option per media type it can render. */
 const DOCX_IMAGE_TYPES: Readonly<
@@ -51,6 +53,15 @@ function emuToPixels(emu: number): number {
   return Math.round(emu / EMU_PER_PIXEL);
 }
 
+function oversizedDimensionsWarning(field: HeaderFooterField): string | undefined {
+  const oversized = [field.widthEmu, field.heightEmu].some(
+    (emu) => emu !== undefined && emuToPixels(emu) * EMU_PER_PIXEL > MAX_DRAWING_EMU
+  );
+  return oversized
+    ? 'image dimensions exceed the Word drawing limit and will not render'
+    : undefined;
+}
+
 /**
  * The decoded image bytes for `field.imageData`, sniffed to a supported media
  * type, or `undefined` when `imageData` is absent, fails to decode, or does
@@ -72,11 +83,11 @@ function decodeAndSniff(
 /**
  * Render `field` (an `image`-kind field) to a docx `ImageRun`, or `undefined`
  * when it cannot be rendered: `field.kind !== 'image'`, `imageData` absent,
- * undecodable, or unsniffable, or `widthEmu`/`heightEmu` missing.
+ * undecodable, or unsniffable, or dimensions missing/too large for Word.
  *
  * Pure, total, NEVER THROWS — no try/catch, no logger. `docx`'s `ImageRun`
- * constructor performs no content validation on the image buffer (confirmed:
- * `node_modules/docx`, ADR-069); every reachable failure mode is already
+ * constructor performs no content validation on the image buffer, but checks
+ * drawing extents since 9.9 (ADR-069); every reachable failure mode is already
  * excluded by this function's own guard-clause returns before `ImageRun` is
  * ever constructed. The `type` option is always the **sniffed** media type,
  * never `field.imageMediaType` — a stale/mismatched declared type cannot make
@@ -85,6 +96,7 @@ function decodeAndSniff(
 export function renderImageRun(field: HeaderFooterField): ImageRun | undefined {
   if (field.kind !== 'image') return undefined;
   if (field.widthEmu === undefined || field.heightEmu === undefined) return undefined;
+  if (oversizedDimensionsWarning(field) !== undefined) return undefined;
   const sniffed = decodeAndSniff(field);
   if (sniffed === undefined) return undefined;
   const altText =
@@ -160,6 +172,7 @@ export function imageFieldWarnings(field: HeaderFooterField, location: string): 
   if (field.kind !== 'image' || field.imageData === undefined) return [];
   const warnings = [
     missingDimensionsWarning(field),
+    oversizedDimensionsWarning(field),
     unreadableDataWarning(field),
     mediaTypeMismatchWarning(field),
     ...unsupportedKeyWarnings(field),

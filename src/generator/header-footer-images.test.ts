@@ -213,10 +213,8 @@ describe('renderImageRun — EMU to pixel transformation is pure, deterministic,
     [1, 1, 0, 0], // rounds down to 0px — never negative, never NaN
     [914400, 457200, 914400, 457200], // 1in x 0.5in: 96px x 48px, round-trips exactly
     [100000, 200000, 95250, 200025], // rounds to 10px x 21px, does not round-trip exactly
-    // Number.MAX_SAFE_INTEGER / 9525 = 945637717033.4986... rounds to
-    // 945637717033px; re-encoded (px * 9525) is one ULP-scale value below the
-    // original EMU — still finite, still positive, never NaN.
-    [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, 9007199254739325, 9007199254739325],
+    // Largest whole-pixel extent Word can open (225457px).
+    [2147477925, 2147477925, 2147477925, 2147477925],
   ];
 
   it.each(emuCases)(
@@ -230,6 +228,23 @@ describe('renderImageRun — EMU to pixel transformation is pure, deterministic,
       expect(xml).toMatch(new RegExp(`cy="${expectedCy}"`));
     }
   );
+});
+
+describe('header/footer images: oversized drawings do not abort generation (#718)', () => {
+  it.each([
+    [Number.MAX_SAFE_INTEGER, 914400],
+    [914400, Number.MAX_SAFE_INTEGER],
+    // Below Word's EMU limit, but pixel rounding would push the output over it.
+    [2147482688, 914400],
+    [914400, 2147482688],
+  ])('skips an unsupported %d by %d extent and reports its location', (widthEmu, heightEmu) => {
+    const field = { ...VALID_IMAGE_FIELD, widthEmu, heightEmu };
+    expect(renderImageRun(field)).toBeUndefined();
+    expect(imageFieldWarnings(field, 'header.left')).toEqual([
+      'header.left: image dimensions exceed the Word drawing limit and will not render',
+    ]);
+    expect(field).toEqual({ ...VALID_IMAGE_FIELD, widthEmu, heightEmu });
+  });
 });
 
 describe('renderImageRun — altText carries full a11y metadata (name/title/descr) (#308)', () => {

@@ -92,6 +92,10 @@ export function buildFrontMatter(meta: ManualMeta, styleRules?: readonly StyleRu
   const toc = new TableOfContents(TOC_TITLE, {
     hyperlink: true,
     headingStyleRange: TOC_HEADING_RANGE,
+    // docx 9.9 otherwise fills the field from headings and inserts bookmarks.
+    // Explicit empty content preserves our field-only contract (ADR-017).
+    contentChildren: [new Paragraph({ children: [] })],
+    beginDirty: true,
   });
   return [
     ...coverParagraphs(meta, rules),

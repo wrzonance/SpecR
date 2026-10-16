@@ -147,6 +147,16 @@ describe('generateManual', () => {
     expect(h1).toBe(2);
   });
 
+  it('manual TOC remains a dirty field for Word, without precomputed entries (#718)', async () => {
+    const xml = await getDocXml(await generateManual([SECTION_A, SECTION_B], META));
+    const toc = xml.match(/<w:sdt\b[^>]*>.*?<\/w:sdt>/gs)?.find((sdt) => sdt.includes('TOC '));
+    expect(toc).toBeDefined();
+    expect(toc).toContain('w:dirty="true"');
+    expect(toc).toContain('TOC ');
+    expect(toc).not.toContain('SECTION 03 30 00');
+    expect(toc).not.toContain('PAGEREF');
+  });
+
   it('throws GeneratorError when no sections are supplied', async () => {
     await expect(generateManual([], META)).rejects.toBeInstanceOf(GeneratorError);
   });
