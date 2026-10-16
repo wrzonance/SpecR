@@ -77,10 +77,10 @@ overrides:
   js-yaml@<3.15.2: '>=3.15.2 <6'
   vite: ^8.0.16 # GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3
   # GHSA-35p6-xmwp-9g52, GHSA-g8m3-5g58-fq7m, GHSA-p88m-4jfj-68fv,
-  # GHSA-vxpw-j846-p89q (dev, via @redocly/cli). Ceiling raised 7 → 9 in #606,
-  # but the raise is inert: @redocly/cli's own range caps undici inside 6.x, so
-  # a cold install still resolves 6.28.0 either way. The floor is what matters
-  # here; the ceiling is now decorative.
+  # GHSA-vxpw-j846-p89q (historically dev, via @redocly/cli).
+  # No separate undici package remains after json-schema-ref-parser 16.0.5.
+  # Retain the floor/ceiling for future transitive resolutions; this override
+  # does not patch bundled dependencies or Node's built-in fetch.
   undici@<6.27.0: '>=6.27.0 <9'
   # runtime, via ajv (@modelcontextprotocol/sdk). GHSA-jqff-g426-hqxp,
   # GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf, GHSA-7p8r-x3mc-p8w7,
