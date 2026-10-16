@@ -144,7 +144,7 @@
     <PackageReference Include="Refit" Version="16.3.0" />
   </ItemGroup>
   <ItemGroup Condition=" '$(TargetFramework)' == 'net48' ">
-    <PackageReference Include="System.Text.Json" Version="10.0.12" />
+    <PackageReference Include="System.Text.Json" Version="10.0.13" />
   </ItemGroup>
 
   <!-- Deploy the manifest next to the assembly for local install convenience. -->
