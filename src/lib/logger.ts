@@ -66,6 +66,8 @@ let closing: Promise<void> | undefined;
 export async function closeLogger(): Promise<void> {
   if (!transport) return;
   if (closing) return closing;
+  // A previously handled worker failure may have closed it before shutdown.
+  if ('closed' in transport && transport.closed === true) return;
   const activeTransport = transport;
   const keepReferenced = (): void => process.ref(activeTransport);
   // Pino unrefs its worker on ready, which can arrive after shutdown starts.
