@@ -141,7 +141,7 @@
        use the framework's own copy, and the direct reference would be pruned
        to nothing there anyway (NU1510). See ADR-094. -->
   <ItemGroup>
-    <PackageReference Include="Refit" Version="16.3.0" />
+    <PackageReference Include="Refit" Version="16.4.0" />
   </ItemGroup>
   <ItemGroup Condition=" '$(TargetFramework)' == 'net48' ">
     <PackageReference Include="System.Text.Json" Version="10.0.13" />
