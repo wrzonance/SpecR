@@ -80,8 +80,8 @@ importers:
         specifier: ^7.0.0
         version: 7.0.0
       unpdf:
-        specifier: ^1.6.2
-        version: 1.9.0(@napi-rs/canvas@1.0.11)
+        specifier: ^2.0.0
+        version: 2.2.2(@napi-rs/canvas@1.0.11)(pdfjs-dist@6.4.299)
       uuid:
         specifier: ^14.0.1
         version: 14.0.3
@@ -2416,13 +2416,16 @@ packages:
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
 
-  unpdf@1.9.0:
-    resolution: {integrity: sha512-YIXl+jZUBneP22IkRUwFA1b71l+Ad2uX7o7dMfxLSLuCOtaKAQvak7Sz3MtdVsWTsocblznSIGidfXyhnBgBMA==}
-    engines: {node: '>=22'}
+  unpdf@2.2.2:
+    resolution: {integrity: sha512-oYnk0gwtIFVtkDbrll9SOEpXT4yCpCVkqQ/pxgxm9oNZ0GwpkEtRsrJZdyAvXHjaerrQTDFMaGWKWG+CKnb4cw==}
+    engines: {node: '>=24'}
     peerDependencies:
       '@napi-rs/canvas': ^0.1.69 || ^1.0.0
+      pdfjs-dist: '*'
     peerDependenciesMeta:
       '@napi-rs/canvas':
+        optional: true
+      pdfjs-dist:
         optional: true
 
   unpipe@1.0.0:
@@ -4788,9 +4791,10 @@ snapshots:
 
   undici-types@8.9.0: {}
 
-  unpdf@1.9.0(@napi-rs/canvas@1.0.11):
+  unpdf@2.2.2(@napi-rs/canvas@1.0.11)(pdfjs-dist@6.4.299):
     optionalDependencies:
       '@napi-rs/canvas': 1.0.11
+      pdfjs-dist: 6.4.299
 
   unpipe@1.0.0: {}
 
